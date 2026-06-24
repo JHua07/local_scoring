@@ -189,8 +189,10 @@ func backupUploadHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func backupDownloadHandler(w http.ResponseWriter, r *http.Request) {
-	var filename string
-	db.QueryRow("SELECT filename FROM backups ORDER BY id DESC LIMIT 1").Scan(&filename)
+	filename := r.URL.Query().Get("file")
+	if filename == "" {
+		db.QueryRow("SELECT filename FROM backups ORDER BY id DESC LIMIT 1").Scan(&filename)
+	}
 	if filename == "" {
 		http.Error(w, "no backup", http.StatusNotFound)
 		return
@@ -203,6 +205,43 @@ func backupDownloadHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
 	http.ServeFile(w, r, path)
+}
+
+func backupListHandler(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query("SELECT filename, created_at FROM backups ORDER BY id DESC")
+	if err != nil {
+		writeJSON(w, []any{})
+		return
+	}
+	defer rows.Close()
+	type item struct {
+		Filename  string `json:"filename"`
+		CreatedAt string `json:"createdAt"`
+	}
+	var list []item
+	for rows.Next() {
+		var i item
+		rows.Scan(&i.Filename, &i.CreatedAt)
+		// 读取文件大小
+		path := filepath.Join(".", "backups", i.Filename)
+		if info, err := os.Stat(path); err == nil {
+			i.CreatedAt = fmt.Sprintf("%s (%d KB)", i.CreatedAt, info.Size()/1024)
+		}
+		list = append(list, i)
+	}
+	writeJSON(w, list)
+}
+
+func backupDeleteHandler(w http.ResponseWriter, r *http.Request) {
+	filename := r.URL.Query().Get("file")
+	if filename == "" {
+		writeJSON(w, map[string]string{"error": "missing file"})
+		return
+	}
+	path := filepath.Join(".", "backups", filename)
+	os.Remove(path)
+	db.Exec("DELETE FROM backups WHERE filename=?", filename)
+	writeJSON(w, map[string]string{"ok": "true"})
 }
 
 func imageUploadHandler(w http.ResponseWriter, r *http.Request) {
@@ -322,6 +361,8 @@ func main() {
 	mux.HandleFunc("/api/sync/pull", syncPullHandler)
 	mux.HandleFunc("/api/backup/upload", backupUploadHandler)
 	mux.HandleFunc("/api/backup/download", backupDownloadHandler)
+	mux.HandleFunc("/api/backup/list", backupListHandler)
+	mux.HandleFunc("/api/backup/delete", backupDeleteHandler)
 	mux.HandleFunc("/api/images/upload", imageUploadHandler)
 	mux.HandleFunc("/api/images/download", imageDownloadHandler)
 

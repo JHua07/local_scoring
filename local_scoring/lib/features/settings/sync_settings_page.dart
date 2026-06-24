@@ -85,35 +85,23 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
         Wrap(spacing: 8, runSpacing: 8, children: [
           _chip('测试连接', Icons.wifi_find, cs.primary, () => _testConnect()),
           if (!connected) _chip('连接', Icons.link, cs.primary, () => _connect()),
-          if (connected) _chip('立即同步', Icons.sync, cs.primary, () => _syncAll()),
+          if (connected) _chip('拉取', Icons.cloud_download, cs.primary, () => _syncAll()),
+          if (connected) _chip('推送', Icons.cloud_upload, cs.secondary, () => _pushToCloud()),
+          if (connected) _chip('管理备份', Icons.manage_search, cs.outline, () => _manageBackups()),
           if (connected) _chip('断开', Icons.link_off, cs.outline, () => _disconnect()),
         ]),
 
-        // ── 云端操作 ──
-        if (connected) ...[
-          const SizedBox(height: 28),
-          _sectionTitle('云端操作'),
-          Wrap(spacing: 8, runSpacing: 8, children: [
-            _chip('从云端拉取', Icons.cloud_download, cs.primary, () => _pullFromCloud()),
-            _chip('上传备份', Icons.cloud_upload, cs.secondary, () => _uploadBackup()),
-            _chip('覆盖本地', Icons.restore, const Color(0xFFEF5350), () => _overwriteLocal()),
-          ]),
-        ],
-
         const SizedBox(height: 28),
 
-        // ===== 自动备份 =====
-        _sectionTitle('自动备份'),
+        // ── 自动同步 ──
+        _sectionTitle('自动同步'),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
-          title: const Text('自动备份到服务器'),
-          subtitle: Text(connected ? svc.backupIntervalLabel : '请先连接服务器'),
+          title: const Text('自动同步到服务器'),
+          subtitle: Text(svc.autoBackup ? svc.backupIntervalLabel : (connected ? '已关闭' : '请先连接服务器')),
           value: svc.autoBackup,
           onChanged: connected
-              ? (v) {
-                  ref.read(syncServiceProvider).setAutoBackup(v, interval: svc.backupInterval);
-                  setState(() {});
-                }
+              ? (v) { ref.read(syncServiceProvider).setAutoBackup(v, interval: svc.backupInterval); setState(() {}); }
               : null,
         ),
         if (svc.autoBackup)
@@ -121,64 +109,19 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
             padding: const EdgeInsets.only(left: 16),
             child: DropdownButtonFormField<BackupInterval>(
               initialValue: svc.backupInterval,
-              decoration: const InputDecoration(
-                labelText: '备份间隔',
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              ),
-              items: BackupInterval.values.map((e) => DropdownMenuItem(
-                    value: e,
-                    child: Text(switch (e) {
-                      BackupInterval.oneHour => '每小时',
-                      BackupInterval.sixHours => '每 6 小时',
-                      BackupInterval.twelveHours => '每 12 小时',
-                      BackupInterval.oneDay => '每天',
-                      BackupInterval.oneWeek => '每周',
-                    }),
-                  )).toList(),
-              onChanged: (v) {
-                if (v != null) {
-                  ref.read(syncServiceProvider).setAutoBackup(true, interval: v);
-                  setState(() {});
-                }
-              },
+              decoration: const InputDecoration(labelText: '同步间隔', border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
+              items: BackupInterval.values.map((e) => DropdownMenuItem(value: e, child: Text(switch (e) {
+                    BackupInterval.oneHour => '每小时', BackupInterval.sixHours => '每 6 小时',
+                    BackupInterval.twelveHours => '每 12 小时', BackupInterval.oneDay => '每天',
+                    BackupInterval.oneWeek => '每周',
+                  }))).toList(),
+              onChanged: (v) { if (v != null) { ref.read(syncServiceProvider).setAutoBackup(true, interval: v); setState(() {}); } },
             ),
           ),
 
-        const SizedBox(height: 28),
+        const SizedBox(height: 8),
 
-        // ===== 数据来源 =====
-        _sectionTitle('数据来源'),
-        Container(
-          decoration: BoxDecoration(
-            color: cs.surfaceContainerHighest.withValues(alpha: 0.4),
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Column(
-            children: DataSource.values.map((ds) {
-              final isActive = svc.dataSource == ds;
-              final (icon, label, desc) = switch (ds) {
-                DataSource.local => (Icons.phone_android, '本机数据', '使用手机本地存储的数据'),
-                DataSource.cloud => (Icons.cloud, '云端数据', '使用服务器同步的数据（需已同步）'),
-              };
-              return ListTile(
-                leading: Icon(icon, color: isActive ? cs.primary : cs.outline),
-                title: Text(label, style: TextStyle(fontWeight: isActive ? FontWeight.w600 : FontWeight.normal)),
-                subtitle: Text(desc, style: const TextStyle(fontSize: 12)),
-                trailing: isActive ? Icon(Icons.check_circle, color: cs.primary, size: 20) : const SizedBox(width: 20),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                onTap: () {
-                  if (ds == DataSource.cloud && !connected) {
-                    _showMsg('请先连接服务器');
-                    return;
-                  }
-                  ref.read(syncServiceProvider).setDataSource(ds);
-                  setState(() {});
-                },
-              );
-            }).toList(),
-          ),
-        ),
+        // 状态信息
 
         const SizedBox(height: 8),
 
@@ -221,7 +164,15 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
     _busy = true; _status = '正在测试...'; setState(() {});
     try {
       final resp = await http.get(Uri.parse('$base/api/health')).timeout(const Duration(seconds: 10));
-      _status = resp.statusCode == 200 ? '✅ 连接成功！服务器正常' : '⚠️ 状态码: ${resp.statusCode}';
+      if (resp.statusCode == 200) {
+        _status = '✅ 连接成功！服务器正常';
+        // 保存地址到磁盘，下次进来直接显示
+        final svc = ref.read(syncServiceProvider);
+        svc.configure(baseUrl: url, token: svc.token, deviceId: svc.deviceId);
+        svc.saveConfig();
+      } else {
+        _status = '⚠️ 状态码: ${resp.statusCode}';
+      }
     } catch (_) { _status = '❌ 无法连接'; }
     _busy = false; setState(() {});
   }
@@ -253,38 +204,60 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
     _busy = false; setState(() {});
   }
 
-  Future<void> _pullFromCloud() => _syncAll();
-
-  Future<void> _uploadBackup() async {
-    _busy = true; _status = '正在上传备份...'; setState(() {});
+  Future<void> _pushToCloud() async {
+    _busy = true; _status = '正在推送...'; setState(() {});
     try {
       final repo = ref.read(reviewRepositoryProvider) as LocalJsonReviewRepository;
-      final zipPath = p.join(Directory.systemTemp.path, 'upload_${DateTime.now().millisecondsSinceEpoch}.zip');
+      final zipPath = p.join(Directory.systemTemp.path, 'push_${DateTime.now().millisecondsSinceEpoch}.zip');
       await repo.exportBackup(zipPath);
       final ok = await ref.read(syncServiceProvider).uploadBackup(File(zipPath));
-      _status = ok ? '✅ 上传成功' : '❌ 上传失败';
+      _status = ok ? '✅ 推送成功' : '❌ 推送失败';
       try { await File(zipPath).delete(); } catch (_) {}
     } catch (e) { _status = '❌ $e'; }
     _busy = false; setState(() {});
   }
 
-  Future<void> _overwriteLocal() async {
-    final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
-          title: const Text('确认覆盖'), content: const Text('将用服务器备份覆盖本地全部数据，不可撤销。'),
-          actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')), FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: const Color(0xFFEF5350)), child: const Text('确认覆盖'))],
-        ));
-    if (ok != true) return;
-    _busy = true; _status = '正在下载备份...'; setState(() {});
-    try {
-      final zip = await ref.read(syncServiceProvider).downloadBackup(Directory.systemTemp.path);
-      if (zip == null) { _status = '❌ 服务器暂无备份'; _busy = false; setState(() {}); return; }
-      final repo = ref.read(reviewRepositoryProvider) as LocalJsonReviewRepository;
-      await repo.clearAll();
-      final count = await repo.importBackup(zip.path);
-      await ref.read(reviewListProvider.notifier).loadAll();
-      _status = '✅ 覆盖完成，导入 $count 条';
-    } catch (e) { _status = '❌ $e'; }
+  Future<void> _manageBackups() async {
+    _busy = true; setState(() {});
+    final backups = await ref.read(syncServiceProvider).listBackups();
     _busy = false; setState(() {});
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('云端备份管理'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: backups.isEmpty
+              ? const Text('暂无云端备份')
+              : ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: backups.length,
+                  itemBuilder: (_, i) {
+                    final b = backups[i];
+                    final name = b['filename'] as String? ?? '';
+                    final info = b['createdAt'] as String? ?? '';
+                    return ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.archive, size: 20),
+                      title: Text(name, style: const TextStyle(fontSize: 13)),
+                      subtitle: Text(info, style: const TextStyle(fontSize: 11)),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                        onPressed: () async {
+                          final ok = await ref.read(syncServiceProvider).deleteBackup(name);
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          if (mounted) _showMsg(ok ? '已删除 $name' : '删除失败');
+                        },
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭'))],
+      ),
+    );
   }
 
   void _disconnect() {

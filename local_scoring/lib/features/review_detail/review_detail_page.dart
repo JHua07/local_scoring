@@ -611,7 +611,11 @@ class _TimelineSectionState extends State<_TimelineSection>
                       onTap: () => setState(() => _expandedId = isExpanded ? null : eval.id),
                       onAnnotate: (text) => widget.onAddAnnotation(eval.id, text),
                       onDelete: () => widget.onDeleteEval(eval.id),
-                      onEdit: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReviewFormPage(existingItem: widget.item))),
+                      onEdit: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => _EvalFormPage(
+                        templateDimensions: eval.dimensions.keys.toList()..addAll(widget.templateDims.where((d) => !eval.dimensions.containsKey(d))),
+                        existingEval: eval,
+                        onSave: (score, text, dims) => widget.onAddEvaluation(score, text, dims),
+                      ))),
                     ),
                   ),
                 );
@@ -834,9 +838,10 @@ class _NodeRowState extends State<_NodeRow> with SingleTickerProviderStateMixin 
 // 综合分 = 所有维度平均值，无独立分数滑块
 class _EvalFormPage extends StatefulWidget {
   final List<String> templateDimensions;
+  final Evaluation? existingEval; // 编辑模式：预填已有评价数据
   final Future<void> Function(double score, String text, Map<String, double> dims) onSave;
 
-  const _EvalFormPage({required this.templateDimensions, required this.onSave});
+  const _EvalFormPage({required this.templateDimensions, this.existingEval, required this.onSave});
 
   @override
   State<_EvalFormPage> createState() => _EvalFormPageState();
@@ -853,8 +858,17 @@ class _EvalFormPageState extends State<_EvalFormPage> {
   @override
   void initState() {
     super.initState();
-    _score = 5.0;
-    _dims = {for (final d in widget.templateDimensions) d: 5.0};
+    final existing = widget.existingEval;
+    if (existing != null) {
+      // 编辑模式：预填已有数据
+      _score = existing.score;
+      _dims = Map.from(existing.dimensions);
+      _textCtrl.text = existing.reviewText;
+      _imagePaths.addAll(existing.imagePaths);
+    } else {
+      _score = 5.0;
+      _dims = {for (final d in widget.templateDimensions) d: 5.0};
+    }
     _recalc();
   }
 

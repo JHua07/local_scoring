@@ -32,6 +32,7 @@ class SyncService {
   BackupInterval _backupInterval = BackupInterval.oneDay;
   Timer? _backupTimer;
   DateTime? _lastBackupTime;
+  DateTime? _lastSyncTime; // 增量同步：上次拉取时间
 
   // 数据来源
   DataSource _dataSource = DataSource.local;
@@ -62,6 +63,8 @@ class SyncService {
             orElse: () => DataSource.local);
         final lastStr = m['lastBackupTime'] as String?;
         if (lastStr != null) _lastBackupTime = DateTime.tryParse(lastStr);
+        final syncStr = m['lastSyncTime'] as String?;
+        if (syncStr != null) _lastSyncTime = DateTime.tryParse(syncStr);
 
         // 自动重连：有配置就尝试健康检查
         if (isConfigured) _scheduleAutoBackup();
@@ -83,6 +86,7 @@ class SyncService {
         'backupInterval': _backupInterval.name,
         'dataSource': _dataSource.name,
         'lastBackupTime': _lastBackupTime?.toIso8601String(),
+        'lastSyncTime': _lastSyncTime?.toIso8601String(),
       }));
     } catch (e) {
       debugPrint('SyncService saveConfig: $e');
@@ -97,6 +101,7 @@ class SyncService {
   }
 
   String get baseUrl => _baseUrl;
+  String get token => _token;
   String get deviceId => _deviceId;
 
   void configure({required String baseUrl, required String token, required String deviceId}) {
@@ -249,14 +254,17 @@ class SyncService {
     return SyncResult(ok: false, error: '推送失败');
   }
 
-  /// 从服务器拉取数据
-  Future<SyncResult> pull({String? since}) async {
+  /// 从服务器拉取数据（增量：仅拉取上次同步之后的数据）
+  Future<SyncResult> pull() async {
     try {
+      final since = _lastSyncTime?.toUtc().toIso8601String() ?? '1970-01-01T00:00:00Z';
       final resp = await _post('/api/sync/pull', {
         'deviceId': _deviceId,
-        'since': since ?? '1970-01-01T00:00:00Z',
+        'since': since,
       });
       if (resp.statusCode == 200) {
+        _lastSyncTime = DateTime.now().toUtc();
+        await saveConfig();
         final m = jsonDecode(resp.body);
         return SyncResult(
           ok: true,
@@ -281,18 +289,40 @@ class SyncService {
     return false;
   }
 
-  /// 下载服务器备份 zip
-  Future<File?> downloadBackup(String saveDir) async {
+  /// 下载服务器备份 zip（指定文件名，空则最新）
+  Future<File?> downloadBackup(String saveDir, {String? filename}) async {
     try {
-      final resp = await _get('/api/backup/download');
+      final qs = filename != null ? '?file=${Uri.encodeComponent(filename)}' : '';
+      final resp = await _get('/api/backup/download$qs');
       if (resp.statusCode == 200) {
-        final name = 'server_backup_${DateTime.now().millisecondsSinceEpoch}.zip';
+        final name = filename ?? 'server_backup_${DateTime.now().millisecondsSinceEpoch}.zip';
         final f = File(p.join(saveDir, name));
         await f.writeAsBytes(resp.bodyBytes);
         return f;
       }
     } catch (_) {}
     return null;
+  }
+
+  /// 列出服务器上所有备份
+  Future<List<Map<String, dynamic>>> listBackups() async {
+    try {
+      final resp = await _get('/api/backup/list');
+      if (resp.statusCode == 200) {
+        final list = jsonDecode(resp.body) as List;
+        return list.cast<Map<String, dynamic>>();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  /// 删除服务器上指定备份
+  Future<bool> deleteBackup(String filename) async {
+    try {
+      final resp = await _get('/api/backup/delete?file=${Uri.encodeComponent(filename)}');
+      return resp.statusCode == 200;
+    } catch (_) {}
+    return false;
   }
 
   /// 上传单张图片

@@ -202,7 +202,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           color: cs.surfaceContainerHighest.withValues(alpha: 0.4),
           borderRadius: BorderRadius.circular(16),
         ),
-        child: Column(
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+          child: Column(
           children: ThemeMode.values.map((mode) {
             final isSelected = currentTheme == mode;
             final (icon, label) = switch (mode) {
@@ -225,6 +228,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   ref.read(themeProvider.notifier).setTheme(mode),
             );
           }).toList(),
+          ),
         ),
       ),
     );
