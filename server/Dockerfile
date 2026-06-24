@@ -9,5 +9,5 @@ FROM alpine:3.21
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /app/server /server
 VOLUME ["/data"]
-EXPOSE 92177
-CMD ["/server", "--data", "/data", "--port", "92177"]
+EXPOSE 10257
+CMD ["/server", "--data", "/data", "--port", "10257"]
