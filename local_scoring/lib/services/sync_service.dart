@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -7,13 +8,39 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
+/// 自动备份间隔
+enum BackupInterval {
+  oneHour,
+  sixHours,
+  twelveHours,
+  oneDay,
+  oneWeek,
+}
+
+/// 数据来源
+enum DataSource { local, cloud }
+
 /// 同步服务：与自建 sync-server 通信
 class SyncService {
   String _baseUrl = '';
   String _token = '';
   String _deviceId = '';
+  Completer<void>? _initCompleter;
+
+  // 自动备份
+  bool _autoBackup = false;
+  BackupInterval _backupInterval = BackupInterval.oneDay;
+  Timer? _backupTimer;
+  DateTime? _lastBackupTime;
+
+  // 数据来源
+  DataSource _dataSource = DataSource.local;
 
   bool get isConfigured => _baseUrl.isNotEmpty && _token.isNotEmpty;
+  bool get autoBackup => _autoBackup;
+  BackupInterval get backupInterval => _backupInterval;
+  DateTime? get lastBackupTime => _lastBackupTime;
+  DataSource get dataSource => _dataSource;
 
   // ==================== 配置持久化 ====================
 
@@ -26,6 +53,18 @@ class SyncService {
         _baseUrl = (m['baseUrl'] as String?) ?? '';
         _token = (m['token'] as String?) ?? '';
         _deviceId = (m['deviceId'] as String?) ?? '';
+        _autoBackup = (m['autoBackup'] as bool?) ?? false;
+        _backupInterval = BackupInterval.values.firstWhere(
+            (e) => e.name == (m['backupInterval'] as String?),
+            orElse: () => BackupInterval.oneDay);
+        _dataSource = DataSource.values.firstWhere(
+            (e) => e.name == (m['dataSource'] as String?),
+            orElse: () => DataSource.local);
+        final lastStr = m['lastBackupTime'] as String?;
+        if (lastStr != null) _lastBackupTime = DateTime.tryParse(lastStr);
+
+        // 自动重连：有配置就尝试健康检查
+        if (isConfigured) _scheduleAutoBackup();
       }
     } catch (e) {
       debugPrint('SyncService loadConfig: $e');
@@ -40,6 +79,10 @@ class SyncService {
         'baseUrl': _baseUrl,
         'token': _token,
         'deviceId': _deviceId,
+        'autoBackup': _autoBackup,
+        'backupInterval': _backupInterval.name,
+        'dataSource': _dataSource.name,
+        'lastBackupTime': _lastBackupTime?.toIso8601String(),
       }));
     } catch (e) {
       debugPrint('SyncService saveConfig: $e');
@@ -66,7 +109,75 @@ class SyncService {
     _baseUrl = '';
     _token = '';
     _deviceId = '';
+    _autoBackup = false;
+    _dataSource = DataSource.local;
+    _cancelAutoBackup();
+    _deleteConfigFile();
   }
+
+  Future<void> _deleteConfigFile() async {
+    try {
+      final dir = await _configDir;
+      final f = File(p.join(dir.path, 'sync_config.json'));
+      if (await f.exists()) await f.delete();
+    } catch (_) {}
+  }
+
+  // ==================== 自动备份 ====================
+
+  void setAutoBackup(bool enabled, {BackupInterval interval = BackupInterval.oneDay}) {
+    _autoBackup = enabled;
+    _backupInterval = interval;
+    if (enabled) {
+      _scheduleAutoBackup();
+    } else {
+      _cancelAutoBackup();
+    }
+    saveConfig();
+  }
+
+  void setDataSource(DataSource source) {
+    _dataSource = source;
+    saveConfig();
+  }
+
+  void _scheduleAutoBackup() {
+    _cancelAutoBackup();
+    final dur = switch (_backupInterval) {
+      BackupInterval.oneHour => const Duration(hours: 1),
+      BackupInterval.sixHours => const Duration(hours: 6),
+      BackupInterval.twelveHours => const Duration(hours: 12),
+      BackupInterval.oneDay => const Duration(days: 1),
+      BackupInterval.oneWeek => const Duration(days: 7),
+    };
+    _backupTimer = Timer.periodic(dur, (_) => _doAutoBackup());
+  }
+
+  void _cancelAutoBackup() {
+    _backupTimer?.cancel();
+    _backupTimer = null;
+  }
+
+  Future<void> _doAutoBackup() async {
+    if (!isConfigured) return;
+    try {
+      // 导出本地备份并上传
+      final repo = await _configDir;
+      // TODO: 调用仓库 exportBackup 生成临时 zip 并 upload
+      debugPrint('Auto-backup triggered at ${DateTime.now()}');
+    } catch (e) {
+      debugPrint('Auto-backup failed: $e');
+    }
+  }
+
+  /// 备份间隔持续时间描述
+  String get backupIntervalLabel => switch (_backupInterval) {
+        BackupInterval.oneHour => '每小时',
+        BackupInterval.sixHours => '每 6 小时',
+        BackupInterval.twelveHours => '每 12 小时',
+        BackupInterval.oneDay => '每天',
+        BackupInterval.oneWeek => '每周',
+      };
 
   // ==================== HTTP 封装 ====================
 
@@ -232,6 +343,7 @@ class SyncResult {
 
 final syncServiceProvider = Provider<SyncService>((ref) {
   final s = SyncService();
+  // Fire-and-forget load, page will await its own _load()
   s.loadConfig();
   return s;
 });

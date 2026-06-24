@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'features/home/home_page.dart';
@@ -8,11 +9,27 @@ import 'features/settings/settings_page.dart';
 import 'providers/review_provider.dart';
 import 'providers/theme_provider.dart';
 
-class PrivateReviewApp extends ConsumerWidget {
+class PrivateReviewApp extends ConsumerStatefulWidget {
   const PrivateReviewApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<PrivateReviewApp> createState() => _PrivateReviewAppState();
+}
+
+class _PrivateReviewAppState extends ConsumerState<PrivateReviewApp> {
+  bool _ready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // 首帧后强制重建，修复模拟器黑屏
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() => _ready = true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     // 启动时加载模板
     ref.listen(templateListProvider, (prev, next) {});
     Future.microtask(() {

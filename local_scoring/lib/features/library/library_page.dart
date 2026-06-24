@@ -21,11 +21,7 @@ class LibraryPage extends ConsumerStatefulWidget {
   ConsumerState<LibraryPage> createState() => _LibraryPageState();
 }
 
-class _LibraryPageState extends ConsumerState<LibraryPage>
-    with AutomaticKeepAliveClientMixin {
-  @override
-  bool get wantKeepAlive => true;
-
+class _LibraryPageState extends ConsumerState<LibraryPage> {
   String _searchQuery = '';
   String? _selectedTemplateId;
   SortMode _sortMode = SortMode.time;
@@ -43,7 +39,6 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
 
   @override
   Widget build(BuildContext context) {
-    super.build(context);
     final reviewState = ref.watch(reviewListProvider);
     final templateState = ref.watch(templateListProvider);
     final colorScheme = Theme.of(context).colorScheme;

@@ -18,7 +18,7 @@ class LocalJsonReviewRepository implements ReviewRepository {
   static const String _reviewsFile = 'reviews.json';
   static const String _templatesFile = 'templates.json';
   static const String _imagesDir = 'images';
-  static const int _recycleBinDays = 30;
+  static const int _recycleBinDays = 7;
 
   // ========== 目录 / 文件引用 ==========
 
