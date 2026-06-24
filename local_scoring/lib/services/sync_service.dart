@@ -263,14 +263,18 @@ class SyncService {
         'since': since,
       });
       if (resp.statusCode == 200) {
-        _lastSyncTime = DateTime.now().toUtc();
-        await saveConfig();
         final m = jsonDecode(resp.body);
-        return SyncResult(
+        final result = SyncResult(
           ok: true,
           serverReviews: _parseReviews(m['reviews']),
           serverTemplates: _parseTemplates(m['templates']),
         );
+        // 只在解析成功后更新时间
+        if (result.ok) {
+          _lastSyncTime = DateTime.now().toUtc();
+          await saveConfig();
+        }
+        return result;
       }
     } catch (e) {
       debugPrint('SyncService pull: $e');

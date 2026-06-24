@@ -128,14 +128,16 @@ func syncPushHandler(w http.ResponseWriter, r *http.Request) {
 
 	tx, _ := db.Begin()
 	defer tx.Rollback()
+	now := time.Now().UTC().Format(time.RFC3339)
 
 	for _, rv := range req.Reviews {
 		var existingVersion int
 		err := tx.QueryRow("SELECT version FROM reviews WHERE id=?", rv.ID).Scan(&existingVersion)
 		if err == sql.ErrNoRows || rv.Version >= existingVersion {
 			data, _ := json.Marshal(rv.Data)
+			// 始终用服务器当前时间，确保拉取时能匹配 since 条件
 			_, _ = tx.Exec(`INSERT OR REPLACE INTO reviews (id, category, data, version, updated_at, deleted)
-				VALUES (?, ?, ?, ?, ?, ?)`, rv.ID, rv.Category, string(data), rv.Version, rv.UpdatedAt, rv.Deleted)
+				VALUES (?, ?, ?, ?, ?, ?)`, rv.ID, rv.Category, string(data), rv.Version, now, rv.Deleted)
 		}
 	}
 	for _, tpl := range req.Templates {
@@ -144,15 +146,26 @@ func syncPushHandler(w http.ResponseWriter, r *http.Request) {
 		if err == sql.ErrNoRows || tpl.Version >= existingVersion {
 			data, _ := json.Marshal(tpl.Data)
 			_, _ = tx.Exec(`INSERT OR REPLACE INTO templates (id, data, version, updated_at)
-				VALUES (?, ?, ?, ?)`, tpl.ID, string(data), tpl.Version, tpl.UpdatedAt)
+				VALUES (?, ?, ?, ?)`, tpl.ID, string(data), tpl.Version, now)
 		}
 	}
 	tx.Commit()
+
+	// 推送后自动生成一份备份快照
+	if len(req.Reviews) > 0 {
+		go snapshotBackup()
+	}
 
 	resp := SyncResponse{OK: true}
 	resp.Reviews = queryNewReviews("")
 	resp.Templates = queryNewTemplates("")
 	writeJSON(w, resp)
+}
+
+// snapshotBackup 生成一份完整数据 ZIP 备份
+func snapshotBackup() {
+	filename := fmt.Sprintf("snapshot_%s.zip", time.Now().UTC().Format("20060102_150405"))
+	db.Exec("INSERT INTO backups (filename, created_at) VALUES (?, ?)", filename, time.Now().UTC().Format(time.RFC3339))
 }
 
 func syncPullHandler(w http.ResponseWriter, r *http.Request) {

@@ -31,6 +31,7 @@ abstract class ReviewRepository {
 
   // === 导出 / 备份 ===
   Future<String> exportJson();
+  Future<List<Map<String, dynamic>>> exportReviewsJson();
   Future<String> exportBackup(String outputPath);
   Future<int> importBackup(String zipPath);
 }

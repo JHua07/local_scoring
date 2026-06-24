@@ -307,6 +307,17 @@ class LocalJsonReviewRepository implements ReviewRepository {
     return file.path;
   }
 
+  /// 导出评分数据为 JSON 可序列化列表（用于 sync push）
+  @override
+  Future<List<Map<String, dynamic>>> exportReviewsJson() async {
+    final items = await getAll();
+    return items.map((r) {
+      final json = r.toJson();
+      json['category'] = r.category;
+      return json;
+    }).toList();
+  }
+
   // ========== 备份 / 恢复（ZIP 压缩包，按分类分文件夹） ==========
 
   /// 导出完整备份 zip，结构：

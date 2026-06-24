@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 
+import '../../data/models/review_item.dart';
 import '../../data/repositories/local_json_review_repository.dart';
 import '../../providers/review_provider.dart';
 import '../../services/sync_service.dart';
@@ -57,103 +59,205 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 32), children: [
-        // ── 服务器连接 ──
-        _sectionTitle('服务器连接'),
-        TextField(
-          controller: _urlCtrl,
-          decoration: InputDecoration(
-            hintText: 'https://sync.yourdomain.com',
-            prefixIcon: const Icon(Icons.dns_outlined, size: 20),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-          ),
-          keyboardType: TextInputType.url,
-        ),
-        if (connected)
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Row(children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(color: const Color(0xFF4CAF50).withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
-                child: const Text('已连接', style: TextStyle(fontSize: 11, color: Color(0xFF4CAF50), fontWeight: FontWeight.w600)),
+              // ═══ 连接状态卡片 ═══
+              TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0.0, end: 1.0),
+                duration: const Duration(milliseconds: 500),
+                builder: (_, v, __) => Opacity(
+                  opacity: v,
+                  child: Transform.translate(
+                    offset: Offset(0, (1 - v) * 20),
+                    child: Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: connected
+                              ? [cs.primaryContainer.withValues(alpha: 0.6), cs.primaryContainer.withValues(alpha: 0.2)]
+                              : [cs.surfaceContainerHighest, cs.surfaceContainerHighest.withValues(alpha: 0.5)],
+                          begin: Alignment.topLeft, end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                        border: connected ? Border.all(color: cs.primary.withValues(alpha: 0.2)) : null,
+                      ),
+                      child: Column(children: [
+                        // 状态图标
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 400),
+                          child: Icon(
+                            connected ? Icons.cloud_done : Icons.cloud_off,
+                            key: ValueKey(connected),
+                            size: 40,
+                            color: connected ? cs.primary : cs.outline,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          connected ? '已连接到服务器' : '未连接',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                        if (connected) ...[
+                          const SizedBox(height: 4),
+                          Text('设备 ${svc.deviceId}',
+                              style: TextStyle(fontSize: 12, color: cs.outline, fontFamily: 'monospace')),
+                        ],
+                        const SizedBox(height: 16),
+
+                        // 地址输入
+                        TextField(
+                          controller: _urlCtrl,
+                          style: const TextStyle(fontSize: 14),
+                          decoration: InputDecoration(
+                            hintText: 'https://your-server.com',
+                            prefixIcon: const Icon(Icons.link, size: 18),
+                            filled: true,
+                            fillColor: cs.surface,
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          ),
+                          keyboardType: TextInputType.url,
+                          onChanged: (_) => setState(() {}),
+                        ),
+                        const SizedBox(height: 14),
+
+                        // 按钮
+                        _bigBtn(Icons.wifi_find, '测试连接', cs.primary, () => _testConnect()),
+                        if (!connected)
+                          _bigBtn(Icons.power_settings_new, '连接服务器', const Color(0xFF4CAF50), () => _connect()),
+
+                        if (connected) ...[
+                          const SizedBox(height: 10),
+                          Row(children: [
+                            Expanded(child: _bigBtn(Icons.cloud_download, '拉取', cs.primary, () => _syncAll())),
+                            const SizedBox(width: 10),
+                            Expanded(child: _bigBtn(Icons.cloud_upload, '推送', const Color(0xFFFFA726), () => _pushToCloud())),
+                          ]),
+                          const SizedBox(height: 10),
+                          Row(children: [
+                            Expanded(child: _bigBtn(Icons.archive_outlined, '管理备份', cs.outline.withValues(alpha: 0.7), () => _manageBackups())),
+                            const SizedBox(width: 10),
+                            Expanded(child: _bigBtn(Icons.link_off, '断开连接', const Color(0xFFEF5350), () => _disconnect())),
+                          ]),
+                        ],
+                      ]),
+                    ),
+                  ),
+                ),
               ),
-              const SizedBox(width: 8),
-              Text('设备: ${svc.deviceId}', style: TextStyle(fontSize: 12, color: cs.outline)),
+
+              const SizedBox(height: 24),
+
+              // ═══ 自动同步 ═══
+              TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0.0, end: 1.0),
+                duration: const Duration(milliseconds: 600),
+                builder: (_, v, __) => Opacity(
+                  opacity: v,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: cs.surfaceContainerHighest.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: SwitchListTile(
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      title: const Text('自动同步', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+                      subtitle: Text(svc.autoBackup ? '间隔: ${svc.backupIntervalLabel}' : (connected ? '关闭' : '请先连接'),
+                          style: TextStyle(fontSize: 12, color: cs.outline)),
+                      value: svc.autoBackup,
+                      onChanged: connected ? (v) { ref.read(syncServiceProvider).setAutoBackup(v, interval: svc.backupInterval); setState(() {}); } : null,
+                    ),
+                  ),
+                ),
+              ),
+              if (svc.autoBackup)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8, left: 4, right: 4),
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween(begin: 0.0, end: 1.0),
+                    duration: const Duration(milliseconds: 400),
+                    builder: (_, v, __) => Opacity(
+                      opacity: v,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        decoration: BoxDecoration(
+                          color: cs.surfaceContainerHighest.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: DropdownButtonFormField<BackupInterval>(
+                          initialValue: svc.backupInterval,
+                          decoration: const InputDecoration(labelText: '同步间隔', border: InputBorder.none),
+                          items: BackupInterval.values.map((e) => DropdownMenuItem(value: e, child: Text(switch (e) {
+                                BackupInterval.oneHour => '每小时', BackupInterval.sixHours => '每 6 小时',
+                                BackupInterval.twelveHours => '每 12 小时', BackupInterval.oneDay => '每天',
+                                BackupInterval.oneWeek => '每周',
+                              }))).toList(),
+                          onChanged: (v) { if (v != null) { ref.read(syncServiceProvider).setAutoBackup(true, interval: v); setState(() {}); } },
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
+              // ═══ 状态信息 ═══
+              if (_status.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                AnimatedOpacity(
+                  opacity: _status.isNotEmpty ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 300),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: _status.startsWith('✅') ? const Color(0xFF4CAF50).withValues(alpha: 0.1) : cs.surfaceContainerHighest.withValues(alpha: 0.4),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(children: [
+                      Icon(_status.startsWith('✅') ? Icons.check_circle : _status.startsWith('❌') ? Icons.error : Icons.info,
+                          size: 18, color: cs.outline),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(_status, style: TextStyle(fontSize: 13, color: cs.onSurface.withValues(alpha: 0.7)))),
+                    ]),
+                  ),
+                ),
+              ],
             ]),
-          ),
-        const SizedBox(height: 14),
-        Wrap(spacing: 8, runSpacing: 8, children: [
-          _chip('测试连接', Icons.wifi_find, cs.primary, () => _testConnect()),
-          if (!connected) _chip('连接', Icons.link, cs.primary, () => _connect()),
-          if (connected) _chip('拉取', Icons.cloud_download, cs.primary, () => _syncAll()),
-          if (connected) _chip('推送', Icons.cloud_upload, cs.secondary, () => _pushToCloud()),
-          if (connected) _chip('管理备份', Icons.manage_search, cs.outline, () => _manageBackups()),
-          if (connected) _chip('断开', Icons.link_off, cs.outline, () => _disconnect()),
-        ]),
+    );
+  }
 
-        const SizedBox(height: 28),
-
-        // ── 自动同步 ──
-        _sectionTitle('自动同步'),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('自动同步到服务器'),
-          subtitle: Text(svc.autoBackup ? svc.backupIntervalLabel : (connected ? '已关闭' : '请先连接服务器')),
-          value: svc.autoBackup,
-          onChanged: connected
-              ? (v) { ref.read(syncServiceProvider).setAutoBackup(v, interval: svc.backupInterval); setState(() {}); }
-              : null,
-        ),
-        if (svc.autoBackup)
-          Padding(
-            padding: const EdgeInsets.only(left: 16),
-            child: DropdownButtonFormField<BackupInterval>(
-              initialValue: svc.backupInterval,
-              decoration: const InputDecoration(labelText: '同步间隔', border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
-              items: BackupInterval.values.map((e) => DropdownMenuItem(value: e, child: Text(switch (e) {
-                    BackupInterval.oneHour => '每小时', BackupInterval.sixHours => '每 6 小时',
-                    BackupInterval.twelveHours => '每 12 小时', BackupInterval.oneDay => '每天',
-                    BackupInterval.oneWeek => '每周',
-                  }))).toList(),
-              onChanged: (v) { if (v != null) { ref.read(syncServiceProvider).setAutoBackup(true, interval: v); setState(() {}); } },
-            ),
-          ),
-
-        const SizedBox(height: 8),
-
-        // 状态信息
-
-        const SizedBox(height: 8),
-
-        // 状态信息
-        if (_status.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(12),
+  Widget _bigBtn(IconData icon, String label, Color color, VoidCallback onTap) {
+    final isBusy = _busy && _activeLabel == label;
+    return AnimatedScale(
+      scale: isBusy ? 0.97 : 1.0,
+      duration: const Duration(milliseconds: 150),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _busy ? null : onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(vertical: 14),
             decoration: BoxDecoration(
-              color: cs.surfaceContainerHighest.withValues(alpha: 0.4),
-              borderRadius: BorderRadius.circular(10),
+              color: _busy ? color.withValues(alpha: 0.04) : color.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: color.withValues(alpha: _busy ? 0.1 : 0.18)),
             ),
-            child: Text(_status, style: TextStyle(fontSize: 13, color: cs.outline)),
+            child: Center(
+              child: isBusy
+                  ? SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: color))
+                  : Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(icon, size: 20, color: color),
+                      const SizedBox(width: 8),
+                      Text(label, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: color)),
+                    ]),
+            ),
           ),
-        ],
-      ]),
+        ),
+      ),
     );
   }
 
-  Widget _sectionTitle(String text) {
-    return Padding(padding: const EdgeInsets.only(bottom: 10), child: Text(text, style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)));
-  }
-
-  Widget _chip(String label, IconData icon, Color color, VoidCallback onTap) {
-    return ActionChip(
-      avatar: Icon(icon, size: 16, color: _busy ? color.withValues(alpha: 0.3) : color),
-      label: Text(label, style: TextStyle(fontSize: 13, color: _busy ? color.withValues(alpha: 0.3) : color)),
-      side: BorderSide(color: color.withValues(alpha: 0.25)),
-      backgroundColor: color.withValues(alpha: 0.05),
-      onPressed: _busy ? null : onTap,
-    );
-  }
+  String _activeLabel = '';
 
   // ═══════════ 操作 ═══════════
 
@@ -196,10 +300,29 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
   }
 
   Future<void> _syncAll() async {
-    _busy = true; _status = '正在同步...'; setState(() {});
+    _busy = true; _status = '正在拉取...'; setState(() {});
     try {
       final r = await ref.read(syncServiceProvider).pull();
-      _status = r.ok ? (r.totalChanges > 0 ? '✅ 同步完成，+${r.totalChanges} 条' : '✅ 无新数据') : '❌ ${r.error}';
+      if (!r.ok) { _status = '❌ ${r.error}'; _busy = false; setState(() {}); return; }
+      if (r.totalChanges == 0) { _status = '✅ 无新数据'; _busy = false; setState(() {}); return; }
+
+      // 将服务器数据合并到本地
+      final repo = ref.read(reviewRepositoryProvider) as LocalJsonReviewRepository;
+      var imported = 0;
+      for (final rv in r.serverReviews) {
+        try {
+          final data = rv['data'];
+          if (data is! Map<String, dynamic>) continue;
+          final item = ReviewItem.fromJson(data);
+          final existing = await repo.getAll();
+          if (!existing.any((e) => e.id == item.id)) {
+            await repo.add(item);
+            imported++;
+          }
+        } catch (_) {}
+      }
+      await ref.read(reviewListProvider.notifier).loadAll();
+      _status = '✅ 拉取完成，导入 $imported 条';
     } catch (e) { _status = '❌ $e'; }
     _busy = false; setState(() {});
   }
@@ -207,12 +330,11 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
   Future<void> _pushToCloud() async {
     _busy = true; _status = '正在推送...'; setState(() {});
     try {
+      final svc = ref.read(syncServiceProvider);
       final repo = ref.read(reviewRepositoryProvider) as LocalJsonReviewRepository;
-      final zipPath = p.join(Directory.systemTemp.path, 'push_${DateTime.now().millisecondsSinceEpoch}.zip');
-      await repo.exportBackup(zipPath);
-      final ok = await ref.read(syncServiceProvider).uploadBackup(File(zipPath));
-      _status = ok ? '✅ 推送成功' : '❌ 推送失败';
-      try { await File(zipPath).delete(); } catch (_) {}
+      final reviews = await repo.exportReviewsJson();
+      await svc.push(reviews: reviews, templates: []);
+      _status = '✅ 推送成功，${reviews.length} 条记录';
     } catch (e) { _status = '❌ $e'; }
     _busy = false; setState(() {});
   }
