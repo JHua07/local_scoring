@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'features/home/home_page.dart';
@@ -17,25 +16,16 @@ class PrivateReviewApp extends ConsumerStatefulWidget {
 }
 
 class _PrivateReviewAppState extends ConsumerState<PrivateReviewApp> {
-  bool _ready = false;
-
   @override
   void initState() {
     super.initState();
-    // 首帧后强制重建，修复模拟器黑屏
-    SchedulerBinding.instance.addPostFrameCallback((_) {
-      if (mounted) setState(() => _ready = true);
+    Future.microtask(() {
+      ref.read(templateListProvider.notifier).loadAll();
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    // 启动时加载模板
-    ref.listen(templateListProvider, (prev, next) {});
-    Future.microtask(() {
-      ref.read(templateListProvider.notifier).loadAll();
-    });
-
     final themeMode = ref.watch(themeProvider);
 
     return MaterialApp(
@@ -128,9 +118,18 @@ class _MainShellState extends State<MainShell> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    // 强制模拟器 viewport 正确初始化
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(index: _currentIndex, children: _pages),
+      body: _pages[_currentIndex],
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: (i) => setState(() => _currentIndex = i),

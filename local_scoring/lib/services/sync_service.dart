@@ -34,6 +34,12 @@ class SyncService {
   DateTime? _lastBackupTime;
   DateTime? _lastSyncTime; // 增量同步：上次拉取时间
 
+  /// 重置拉取时间戳（用于数据清空后强制全量拉取）
+  void resetLastSync() {
+    _lastSyncTime = null;
+    saveConfig();
+  }
+
   // 数据来源
   DataSource _dataSource = DataSource.local;
 
@@ -229,60 +235,51 @@ class SyncService {
     return null;
   }
 
-  /// 上传数据到服务器
-  Future<SyncResult> push({
-    required List<Map<String, dynamic>> reviews,
-    required List<Map<String, dynamic>> templates,
-  }) async {
+  /// 推送：打包本地完整数据为 ZIP → 上传到服务器
+  Future<bool> pushFullBackup(File zipFile) async {
     try {
-      final resp = await _post('/api/sync/push', {
-        'deviceId': _deviceId,
-        'reviews': reviews,
-        'templates': templates,
-      });
-      if (resp.statusCode == 200) {
-        final m = jsonDecode(resp.body);
-        return SyncResult(
-          ok: true,
-          serverReviews: _parseReviews(m['reviews']),
-          serverTemplates: _parseTemplates(m['templates']),
-        );
-      }
+      final uri = Uri.parse('$_baseUrl/api/sync/push');
+      final bytes = await zipFile.readAsBytes();
+      final resp = await http.post(uri, headers: _headers, body: bytes)
+          .timeout(const Duration(minutes: 5));
+      return resp.statusCode == 200;
     } catch (e) {
-      debugPrint('SyncService push: $e');
+      debugPrint('pushFullBackup: $e');
+      return false;
     }
-    return SyncResult(ok: false, error: '推送失败');
   }
 
-  /// 从服务器拉取数据（增量：仅拉取上次同步之后的数据）
-  Future<SyncResult> pull() async {
+  /// 拉取：下载最新备份 ZIP → 保存到指定路径
+  Future<File?> pullFullBackup(String savePath) async {
     try {
-      final since = _lastSyncTime?.toUtc().toIso8601String() ?? '1970-01-01T00:00:00Z';
-      final resp = await _post('/api/sync/pull', {
-        'deviceId': _deviceId,
-        'since': since,
-      });
+      final resp = await http.get(
+        Uri.parse('$_baseUrl/api/sync/pull'),
+        headers: _headers,
+      ).timeout(const Duration(minutes: 5));
       if (resp.statusCode == 200) {
-        final m = jsonDecode(resp.body);
-        final result = SyncResult(
-          ok: true,
-          serverReviews: _parseReviews(m['reviews']),
-          serverTemplates: _parseTemplates(m['templates']),
-        );
-        // 只在解析成功后更新时间
-        if (result.ok) {
-          _lastSyncTime = DateTime.now().toUtc();
-          await saveConfig();
-        }
-        return result;
+        final f = File(savePath);
+        await f.writeAsBytes(resp.bodyBytes);
+        return f;
       }
     } catch (e) {
-      debugPrint('SyncService pull: $e');
+      debugPrint('pullFullBackup: $e');
     }
-    return SyncResult(ok: false, error: '拉取失败');
+    return null;
   }
 
-  /// 上传备份 zip
+  /// 检查服务器最新备份名（快速判断有无更新）
+  Future<String?> checkLatestBackup() async {
+    try {
+      final resp = await _get('/api/sync/check');
+      if (resp.statusCode == 200) {
+        final m = jsonDecode(resp.body);
+        return m['latestBackup'] as String?;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// 上传备份 zip（手动备份用）
   Future<bool> uploadBackup(File zipFile) async {
     try {
       final uri = Uri.parse('$_baseUrl/api/backup/upload');
@@ -313,10 +310,19 @@ class SyncService {
     try {
       final resp = await _get('/api/backup/list');
       if (resp.statusCode == 200) {
-        final list = jsonDecode(resp.body) as List;
-        return list.cast<Map<String, dynamic>>();
+        final body = resp.body;
+        debugPrint('listBackups body: ${body.length} chars');
+        final decoded = jsonDecode(body);
+        if (decoded is List) {
+          debugPrint('listBackups: got ${decoded.length} entries');
+          return decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        }
+        debugPrint('listBackups: unexpected type ${decoded.runtimeType}');
       }
-    } catch (_) {}
+      debugPrint('listBackups: HTTP ${resp.statusCode}');
+    } catch (e) {
+      debugPrint('listBackups error: $e');
+    }
     return [];
   }
 
@@ -324,8 +330,11 @@ class SyncService {
   Future<bool> deleteBackup(String filename) async {
     try {
       final resp = await _get('/api/backup/delete?file=${Uri.encodeComponent(filename)}');
+      debugPrint('deleteBackup $filename: HTTP ${resp.statusCode} ${resp.body}');
       return resp.statusCode == 200;
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('deleteBackup error: $e');
+    }
     return false;
   }
 
@@ -343,34 +352,6 @@ class SyncService {
     } catch (_) {}
     return false;
   }
-
-  // ==================== 解析 ====================
-
-  List<Map<String, dynamic>> _parseReviews(dynamic list) {
-    if (list is! List) return [];
-    return list.map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e as Map)).toList();
-  }
-
-  List<Map<String, dynamic>> _parseTemplates(dynamic list) {
-    if (list is! List) return [];
-    return list.map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e as Map)).toList();
-  }
-}
-
-class SyncResult {
-  final bool ok;
-  final String? error;
-  final List<Map<String, dynamic>> serverReviews;
-  final List<Map<String, dynamic>> serverTemplates;
-
-  SyncResult({
-    required this.ok,
-    this.error,
-    this.serverReviews = const [],
-    this.serverTemplates = const [],
-  });
-
-  int get totalChanges => serverReviews.length + serverTemplates.length;
 }
 
 // ==================== Provider ====================

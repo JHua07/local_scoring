@@ -312,9 +312,14 @@ class LocalJsonReviewRepository implements ReviewRepository {
   Future<List<Map<String, dynamic>>> exportReviewsJson() async {
     final items = await getAll();
     return items.map((r) {
-      final json = r.toJson();
-      json['category'] = r.category;
-      return json;
+      return {
+        'id': r.id,
+        'category': r.category,
+        'data': r.toJson(),
+        'version': 1,
+        'updatedAt': r.updatedAt.toUtc().toIso8601String(),
+        'deleted': 0,
+      };
     }).toList();
   }
 

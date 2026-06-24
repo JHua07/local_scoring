@@ -42,11 +42,14 @@ class ReviewListState {
 
 class ReviewListNotifier extends StateNotifier<ReviewListState> {
   final ReviewRepository _repository;
+  bool _isLoading = false;
 
   ReviewListNotifier(this._repository) : super(const ReviewListState());
 
   // ---- 加载 ----
   Future<void> loadAll() async {
+    if (_isLoading) return;
+    _isLoading = true;
     state = state.copyWith(isLoading: true, error: null);
     try {
       final items = await _repository.getAll();
@@ -55,6 +58,8 @@ class ReviewListNotifier extends StateNotifier<ReviewListState> {
     } catch (e) {
       state = state.copyWith(
           isLoading: false, error: '数据加载失败：$e');
+    } finally {
+      _isLoading = false;
     }
   }
 
@@ -284,10 +289,13 @@ class TemplateListState {
 
 class TemplateListNotifier extends StateNotifier<TemplateListState> {
   final ReviewRepository _repository;
+  bool _isLoading = false;
 
   TemplateListNotifier(this._repository) : super(const TemplateListState());
 
   Future<void> loadAll() async {
+    if (_isLoading) return;
+    _isLoading = true;
     state = state.copyWith(isLoading: true);
     try {
       final templates = await _repository.getAllTemplates();
@@ -295,6 +303,8 @@ class TemplateListNotifier extends StateNotifier<TemplateListState> {
           state.copyWith(templates: templates, isLoading: false);
     } catch (e) {
       state = state.copyWith(isLoading: false);
+    } finally {
+      _isLoading = false;
     }
   }
 

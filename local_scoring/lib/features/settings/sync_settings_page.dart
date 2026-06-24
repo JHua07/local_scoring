@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -6,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 
-import '../../data/models/review_item.dart';
 import '../../data/repositories/local_json_review_repository.dart';
 import '../../providers/review_provider.dart';
 import '../../services/sync_service.dart';
@@ -131,6 +129,8 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                             const SizedBox(width: 10),
                             Expanded(child: _bigBtn(Icons.cloud_upload, '推送', const Color(0xFFFFA726), () => _pushToCloud())),
                           ]),
+                          const SizedBox(height: 10),
+                          _bigBtn(Icons.backup_outlined, '上传完整备份', cs.secondary, () => _uploadFullBackup()),
                           const SizedBox(height: 10),
                           Row(children: [
                             Expanded(child: _bigBtn(Icons.archive_outlined, '管理备份', cs.outline.withValues(alpha: 0.7), () => _manageBackups())),
@@ -300,44 +300,49 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
   }
 
   Future<void> _syncAll() async {
-    _busy = true; _status = '正在拉取...'; setState(() {});
+    _busy = true; _activeLabel = '拉取'; _status = '正在下载备份...'; setState(() {});
     try {
-      final r = await ref.read(syncServiceProvider).pull();
-      if (!r.ok) { _status = '❌ ${r.error}'; _busy = false; setState(() {}); return; }
-      if (r.totalChanges == 0) { _status = '✅ 无新数据'; _busy = false; setState(() {}); return; }
+      final svc = ref.read(syncServiceProvider);
+      final savePath = p.join(Directory.systemTemp.path, 'pull_${DateTime.now().millisecondsSinceEpoch}.zip');
+      final zip = await svc.pullFullBackup(savePath);
+      if (zip == null) { _status = '❌ 服务器暂无备份'; _busy = false; _activeLabel = ''; setState(() {}); return; }
 
-      // 将服务器数据合并到本地
       final repo = ref.read(reviewRepositoryProvider) as LocalJsonReviewRepository;
-      var imported = 0;
-      for (final rv in r.serverReviews) {
-        try {
-          final data = rv['data'];
-          if (data is! Map<String, dynamic>) continue;
-          final item = ReviewItem.fromJson(data);
-          final existing = await repo.getAll();
-          if (!existing.any((e) => e.id == item.id)) {
-            await repo.add(item);
-            imported++;
-          }
-        } catch (_) {}
-      }
+      await repo.clearAll();
+      final count = await repo.importBackup(zip.path);
       await ref.read(reviewListProvider.notifier).loadAll();
-      _status = '✅ 拉取完成，导入 $imported 条';
+      _status = '✅ 恢复完成，导入 $count 条';
+      try { await zip.delete(); } catch (_) {}
     } catch (e) { _status = '❌ $e'; }
-    _busy = false; setState(() {});
+    _busy = false; _activeLabel = ''; setState(() {});
   }
 
   Future<void> _pushToCloud() async {
-    _busy = true; _status = '正在推送...'; setState(() {});
+    _busy = true; _activeLabel = '推送'; _status = '正在打包并推送...'; setState(() {});
     try {
-      final svc = ref.read(syncServiceProvider);
       final repo = ref.read(reviewRepositoryProvider) as LocalJsonReviewRepository;
-      final reviews = await repo.exportReviewsJson();
-      await svc.push(reviews: reviews, templates: []);
-      _status = '✅ 推送成功，${reviews.length} 条记录';
+      final zipPath = p.join(Directory.systemTemp.path, 'push_${DateTime.now().millisecondsSinceEpoch}.zip');
+      await repo.exportBackup(zipPath);
+      final ok = await ref.read(syncServiceProvider).pushFullBackup(File(zipPath));
+      _status = ok ? '✅ 推送成功' : '❌ 推送失败';
+      try { await File(zipPath).delete(); } catch (_) {}
     } catch (e) { _status = '❌ $e'; }
-    _busy = false; setState(() {});
+    _busy = false; _activeLabel = ''; setState(() {});
   }
+
+  Future<void> _uploadFullBackup() async {
+    _busy = true; _activeLabel = '上传完整备份'; _status = '正在打包并上传...'; setState(() {});
+    try {
+      final repo = ref.read(reviewRepositoryProvider) as LocalJsonReviewRepository;
+      final zipPath = p.join(Directory.systemTemp.path, 'full_backup_${DateTime.now().millisecondsSinceEpoch}.zip');
+      await repo.exportBackup(zipPath);
+      final ok = await ref.read(syncServiceProvider).uploadBackup(File(zipPath));
+      _status = ok ? '✅ 完整备份上传成功' : '❌ 上传失败';
+      try { await File(zipPath).delete(); } catch (_) {}
+    } catch (e) { _status = '❌ $e'; }
+    _busy = false; _activeLabel = ''; setState(() {});
+  }
+
 
   Future<void> _manageBackups() async {
     _busy = true; setState(() {});
@@ -347,37 +352,47 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('云端备份管理'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: backups.isEmpty
-              ? const Text('暂无云端备份')
-              : ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: backups.length,
-                  itemBuilder: (_, i) {
-                    final b = backups[i];
-                    final name = b['filename'] as String? ?? '';
-                    final info = b['createdAt'] as String? ?? '';
-                    return ListTile(
-                      dense: true,
-                      leading: const Icon(Icons.archive, size: 20),
-                      title: Text(name, style: const TextStyle(fontSize: 13)),
-                      subtitle: Text(info, style: const TextStyle(fontSize: 11)),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
-                        onPressed: () async {
-                          final ok = await ref.read(syncServiceProvider).deleteBackup(name);
-                          if (ctx.mounted) Navigator.pop(ctx);
-                          if (mounted) _showMsg(ok ? '已删除 $name' : '删除失败');
-                        },
-                      ),
-                    );
-                  },
-                ),
-        ),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭'))],
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          var list = backups;
+          return AlertDialog(
+            title: const Text('云端备份管理'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: list.isEmpty
+                  ? const Text('暂无云端备份')
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: list.length,
+                      itemBuilder: (_, i) {
+                        final b = list[i];
+                        final name = b['filename'] as String? ?? '';
+                        final info = b['createdAt'] as String? ?? '';
+                        return ListTile(
+                          dense: true,
+                          leading: const Icon(Icons.archive, size: 20),
+                          title: Text(name, style: const TextStyle(fontSize: 13)),
+                          subtitle: Text(info, style: const TextStyle(fontSize: 11)),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                            onPressed: () async {
+                              final ok = await ref.read(syncServiceProvider).deleteBackup(name);
+                              if (ok) {
+                                list = list.where((b) => b['filename'] != name).toList();
+                                setDialogState(() {});
+                                _showMsg('已删除');
+                              } else {
+                                _showMsg('删除失败');
+                              }
+                            },
+                          ),
+                        );
+                      },
+                    ),
+            ),
+            actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭'))],
+          );
+        },
       ),
     );
   }

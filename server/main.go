@@ -14,12 +14,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
 
 var db *sql.DB
+var dataDir string // 数据目录全局引用
 
 // ==================== 数据模型 ====================
 
@@ -122,56 +124,40 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func syncPushHandler(w http.ResponseWriter, r *http.Request) {
-	var req PushRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, SyncResponse{OK: false, Message: "invalid body"})
+	body, _ := io.ReadAll(r.Body)
+	defer r.Body.Close()
+	if len(body) == 0 {
+		writeJSON(w, map[string]string{"ok": "false", "message": "empty"})
 		return
 	}
 
-	tx, _ := db.Begin()
-	defer tx.Rollback()
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	for _, rv := range req.Reviews {
-		var existingVersion int
-		err := tx.QueryRow("SELECT version FROM reviews WHERE id=?", rv.ID).Scan(&existingVersion)
-		if err == sql.ErrNoRows || rv.Version >= existingVersion {
-			data, _ := json.Marshal(rv.Data)
-			// 始终用服务器当前时间，确保拉取时能匹配 since 条件
-			_, _ = tx.Exec(`INSERT OR REPLACE INTO reviews (id, category, data, version, updated_at, deleted)
-				VALUES (?, ?, ?, ?, ?, ?)`, rv.ID, rv.Category, string(data), rv.Version, now, rv.Deleted)
-		}
+	backupDir := filepath.Join(dataDir, "backups")
+	os.MkdirAll(backupDir, 0755)
+	now := time.Now().UTC()
+	filename := fmt.Sprintf("%s.zip", now.Format("20060102_150405"))
+	zipPath := filepath.Join(backupDir, filename)
+	if err := os.WriteFile(zipPath, body, 0644); err != nil {
+		writeJSON(w, map[string]string{"ok": "false", "message": err.Error()})
+		return
 	}
-	for _, tpl := range req.Templates {
-		var existingVersion int
-		err := tx.QueryRow("SELECT version FROM templates WHERE id=?", tpl.ID).Scan(&existingVersion)
-		if err == sql.ErrNoRows || tpl.Version >= existingVersion {
-			data, _ := json.Marshal(tpl.Data)
-			_, _ = tx.Exec(`INSERT OR REPLACE INTO templates (id, data, version, updated_at)
-				VALUES (?, ?, ?, ?)`, tpl.ID, string(data), tpl.Version, now)
-		}
-	}
-	tx.Commit()
+	db.Exec("INSERT INTO backups (filename, created_at) VALUES (?, ?)", filename, now.Format(time.RFC3339))
 
-	// 推送后自动生成一份备份快照
-	if len(req.Reviews) > 0 {
-		go snapshotBackup()
-	}
-
-	resp := SyncResponse{OK: true}
-	resp.Reviews = queryNewReviews("")
-	resp.Templates = queryNewTemplates("")
-	writeJSON(w, resp)
+	importFromZIP(zipPath, now)
+	extractImages(zipPath)
+	cleanupOldBackups(3, backupDir)
+	log.Printf("push: %s (%d bytes)", filename, len(body))
+	writeJSON(w, map[string]string{"ok": "true", "filename": filename})
 }
 
 // snapshotBackup 将当前全部 reviews + templates 打包为 ZIP 备份
 func snapshotBackup() {
-	filename := fmt.Sprintf("snapshot_%s.zip", time.Now().UTC().Format("20060102_150405"))
-	path := filepath.Join(".", "backups", filename)
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	backupDir := filepath.Join(dataDir, "backups")
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
 		log.Printf("snapshot mkdir: %v", err)
 		return
 	}
+	filename := fmt.Sprintf("snapshot_%s.zip", time.Now().UTC().Format("20060102_150405"))
+	path := filepath.Join(backupDir, filename)
 
 	buf := new(bytes.Buffer)
 	w := zip.NewWriter(buf)
@@ -244,7 +230,7 @@ func backupUploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filename := fmt.Sprintf("backup_%s.zip", time.Now().Format("20060102_150405"))
-	path := filepath.Join(".", "backups", filename)
+	path := filepath.Join(dataDir, "backups", filename)
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		writeJSON(w, map[string]string{"error": err.Error()})
 		return
@@ -266,7 +252,7 @@ func backupDownloadHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no backup", http.StatusNotFound)
 		return
 	}
-	path := filepath.Join(".", "backups", filename)
+	path := filepath.Join(dataDir, "backups", filename)
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		http.Error(w, "file not found", http.StatusNotFound)
 		return
@@ -287,12 +273,12 @@ func backupListHandler(w http.ResponseWriter, r *http.Request) {
 		Filename  string `json:"filename"`
 		CreatedAt string `json:"createdAt"`
 	}
-	var list []item
+	var list = make([]item, 0)
 	for rows.Next() {
 		var i item
 		rows.Scan(&i.Filename, &i.CreatedAt)
 		// 读取文件大小
-		path := filepath.Join(".", "backups", i.Filename)
+		path := filepath.Join(dataDir, "backups", i.Filename)
 		if info, err := os.Stat(path); err == nil {
 			i.CreatedAt = fmt.Sprintf("%s (%d KB)", i.CreatedAt, info.Size()/1024)
 		}
@@ -307,90 +293,116 @@ func backupDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"error": "missing file"})
 		return
 	}
-	path := filepath.Join(".", "backups", filename)
-	os.Remove(path)
-	db.Exec("DELETE FROM backups WHERE filename=?", filename)
-	writeJSON(w, map[string]string{"ok": "true"})
-}
-
-func imageUploadHandler(w http.ResponseWriter, r *http.Request) {
-	body, _ := io.ReadAll(r.Body)
-	defer r.Body.Close()
-	var req struct {
-		Path     string `json:"path"`
-		ReviewID string `json:"reviewId"`
-		Data     []byte `json:"data"`
+	path := filepath.Join(dataDir, "backups", filename)
+	if err := os.Remove(path); err != nil {
+		log.Printf("backupDeleteHandler remove file: %v", err)
 	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		writeJSON(w, map[string]string{"error": "invalid"})
+	result, err := db.Exec("DELETE FROM backups WHERE filename=?", filename)
+	if err != nil {
+		log.Printf("backupDeleteHandler db delete error: %v", err)
+		writeJSON(w, map[string]string{"error": err.Error()})
 		return
 	}
-	db.Exec("INSERT OR REPLACE INTO images (path, data, review_id) VALUES (?, ?, ?)",
-		req.Path, req.Data, req.ReviewID)
+	n, _ := result.RowsAffected()
+	log.Printf("backupDeleteHandler: deleted %s (%d rows)", filename, n)
 	writeJSON(w, map[string]string{"ok": "true"})
 }
 
 func imageDownloadHandler(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Query().Get("path")
-	if path == "" {
+	imgPath := r.URL.Query().Get("path")
+	if imgPath == "" {
 		http.Error(w, "missing path", http.StatusBadRequest)
 		return
 	}
-	var data []byte
-	err := db.QueryRow("SELECT data FROM images WHERE path=?", path).Scan(&data)
-	if err != nil {
+	fullPath := filepath.Join(dataDir, "images", imgPath)
+	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Write(data)
+	http.ServeFile(w, r, fullPath)
 }
 
-// ==================== 辅助函数 ====================
+// ==================== 辅助 ====================
 
-func queryNewReviews(since string) []ReviewData {
-	rows, err := db.Query(
-		"SELECT id, category, data, version, updated_at, deleted FROM reviews WHERE updated_at > ? ORDER BY updated_at",
-		sinceOrDefault(since))
+func importFromZIP(zipPath string, now time.Time) {
+	zr, err := zip.OpenReader(zipPath)
 	if err != nil {
-		return nil
+		log.Printf("importZIP: %v", err)
+		return
+	}
+	defer zr.Close()
+	nowStr := now.Format(time.RFC3339)
+	for _, f := range zr.File {
+		rc, _ := f.Open()
+		data, _ := io.ReadAll(rc)
+		rc.Close()
+		switch f.Name {
+		case "reviews.json":
+			var reviews []map[string]any
+			if json.Unmarshal(data, &reviews) == nil {
+				tx, _ := db.Begin()
+				for _, rv := range reviews {
+					id, _ := rv["id"].(string)
+					cat, _ := rv["category"].(string)
+					raw, _ := json.Marshal(rv)
+					if id != "" {
+						tx.Exec(`INSERT OR REPLACE INTO reviews (id, category, data, version, updated_at, deleted) VALUES (?, ?, ?, 1, ?, 0)`, id, cat, string(raw), nowStr)
+					}
+				}
+				tx.Commit()
+			}
+		case "templates.json":
+			var tmpls []map[string]any
+			if json.Unmarshal(data, &tmpls) == nil {
+				for _, t := range tmpls {
+					id, _ := t["id"].(string)
+					raw, _ := json.Marshal(t)
+					if id != "" {
+						db.Exec(`INSERT OR REPLACE INTO templates (id, data, version, updated_at) VALUES (?, ?, 1, ?)`, id, string(raw), nowStr)
+					}
+				}
+			}
+		}
+	}
+}
+
+func extractImages(zipPath string) {
+	imgDir := filepath.Join(dataDir, "images")
+	os.MkdirAll(imgDir, 0755)
+	zr, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return
+	}
+	defer zr.Close()
+	for _, f := range zr.File {
+		if !strings.HasPrefix(f.Name, "images/") || f.FileInfo().IsDir() {
+			continue
+		}
+		rc, _ := f.Open()
+		data, _ := io.ReadAll(rc)
+		rc.Close()
+		destPath := filepath.Join(imgDir, f.Name)
+		os.MkdirAll(filepath.Dir(destPath), 0755)
+		os.WriteFile(destPath, data, 0644)
+	}
+}
+
+func cleanupOldBackups(keep int, backupDir string) {
+	rows, _ := db.Query("SELECT filename FROM backups ORDER BY id DESC")
+	if rows == nil {
+		return
 	}
 	defer rows.Close()
-	var list []ReviewData
+	var files []string
 	for rows.Next() {
-		var r ReviewData
-		var raw string
-		rows.Scan(&r.ID, &r.Category, &raw, &r.Version, &r.UpdatedAt, &r.Deleted)
-		r.Data = json.RawMessage(raw)
-		list = append(list, r)
+		var fn string
+		rows.Scan(&fn)
+		files = append(files, fn)
 	}
-	return list
-}
-
-func queryNewTemplates(since string) []TemplateData {
-	rows, err := db.Query(
-		"SELECT id, data, version, updated_at FROM templates WHERE updated_at > ? ORDER BY updated_at",
-		sinceOrDefault(since))
-	if err != nil {
-		return nil
+	for i := keep; i < len(files); i++ {
+		os.Remove(filepath.Join(backupDir, files[i]))
+		db.Exec("DELETE FROM backups WHERE filename=?", files[i])
 	}
-	defer rows.Close()
-	var list []TemplateData
-	for rows.Next() {
-		var t TemplateData
-		var raw string
-		rows.Scan(&t.ID, &raw, &t.Version, &t.UpdatedAt)
-		t.Data = json.RawMessage(raw)
-		list = append(list, t)
-	}
-	return list
-}
-
-func sinceOrDefault(s string) string {
-	if s == "" {
-		return "1970-01-01T00:00:00Z"
-	}
-	return s
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -415,10 +427,11 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 func main() {
 	port := flag.String("port", "10257", "listen port")
-	dataDir := flag.String("data", "./data", "data directory")
+	data := flag.String("data", "./data", "data directory")
 	flag.Parse()
+	dataDir = *data
 
-	if err := initDB(*dataDir); err != nil {
+	if err := initDB(dataDir); err != nil {
 		log.Fatalf("db init: %v", err)
 	}
 	defer db.Close()
@@ -428,11 +441,10 @@ func main() {
 	mux.HandleFunc("/api/auth/register", registerHandler)
 	mux.HandleFunc("/api/sync/push", syncPushHandler)
 	mux.HandleFunc("/api/sync/pull", syncPullHandler)
-	mux.HandleFunc("/api/backup/upload", backupUploadHandler)
-	mux.HandleFunc("/api/backup/download", backupDownloadHandler)
+	mux.HandleFunc("/api/sync/check", syncCheckHandler)
 	mux.HandleFunc("/api/backup/list", backupListHandler)
+	mux.HandleFunc("/api/backup/download", backupDownloadHandler)
 	mux.HandleFunc("/api/backup/delete", backupDeleteHandler)
-	mux.HandleFunc("/api/images/upload", imageUploadHandler)
 	mux.HandleFunc("/api/images/download", imageDownloadHandler)
 
 	addr := fmt.Sprintf(":%s", *port)
