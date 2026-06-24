@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/zip"
+	"bytes"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -162,10 +164,64 @@ func syncPushHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp)
 }
 
-// snapshotBackup 生成一份完整数据 ZIP 备份
+// snapshotBackup 将当前全部 reviews + templates 打包为 ZIP 备份
 func snapshotBackup() {
 	filename := fmt.Sprintf("snapshot_%s.zip", time.Now().UTC().Format("20060102_150405"))
-	db.Exec("INSERT INTO backups (filename, created_at) VALUES (?, ?)", filename, time.Now().UTC().Format(time.RFC3339))
+	path := filepath.Join(".", "backups", filename)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		log.Printf("snapshot mkdir: %v", err)
+		return
+	}
+
+	buf := new(bytes.Buffer)
+	w := zip.NewWriter(buf)
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// reviews JSON
+	rows, err := db.Query("SELECT id, category, data, version, updated_at, deleted FROM reviews")
+	if err == nil {
+		var reviews []map[string]any
+		for rows.Next() {
+			var id, cat, raw, updated string
+			var ver, del int
+			rows.Scan(&id, &cat, &raw, &ver, &updated, &del)
+			reviews = append(reviews, map[string]any{
+				"id": id, "category": cat, "data": json.RawMessage(raw),
+				"version": ver, "updatedAt": updated, "deleted": del,
+			})
+		}
+		rows.Close()
+		if data, err := json.Marshal(reviews); err == nil {
+			f, _ := w.Create("reviews.json")
+			f.Write(data)
+		}
+	}
+
+	// templates JSON
+	tRows, err := db.Query("SELECT id, data, version, updated_at FROM templates")
+	if err == nil {
+		var tmpls []map[string]any
+		for tRows.Next() {
+			var id, raw, updated string
+			var ver int
+			tRows.Scan(&id, &raw, &ver, &updated)
+			tmpls = append(tmpls, map[string]any{"id": id, "data": json.RawMessage(raw), "version": ver, "updatedAt": updated})
+		}
+		tRows.Close()
+		if data, err := json.Marshal(tmpls); err == nil {
+			f, _ := w.Create("templates.json")
+			f.Write(data)
+		}
+	}
+
+	w.Close()
+
+	if err := os.WriteFile(path, buf.Bytes(), 0644); err != nil {
+		log.Printf("snapshot write: %v", err)
+		return
+	}
+	db.Exec("INSERT INTO backups (filename, created_at) VALUES (?, ?)", filename, now)
+	log.Printf("snapshot created: %s (%d bytes)", filename, buf.Len())
 }
 
 func syncPullHandler(w http.ResponseWriter, r *http.Request) {
