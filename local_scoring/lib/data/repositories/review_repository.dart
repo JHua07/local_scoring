@@ -29,6 +29,8 @@ abstract class ReviewRepository {
   Future<void> updateTemplate(ScoringTemplate template);
   Future<void> deleteTemplate(String id);
 
-  // === 导出 ===
+  // === 导出 / 备份 ===
   Future<String> exportJson();
+  Future<String> exportBackup(String outputPath);
+  Future<int> importBackup(String zipPath);
 }

@@ -20,7 +20,8 @@ class ReviewCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final config = getCategoryConfig(item.category);
+    final catIcon = getCategoryIcon(item.category);
+    final thumbPath = item.firstImagePath;
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -36,24 +37,15 @@ class ReviewCard extends StatelessWidget {
           padding: const EdgeInsets.all(14),
           child: Row(
             children: [
-              // 图片缩略图
-              if (item.imagePaths.isNotEmpty)
+              // 缩略图（最早一张）
+              if (thumbPath != null && File(thumbPath).existsSync())
                 ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  child: _buildImage(context, item.imagePaths.first, colorScheme),
+                  child: Image.file(File(thumbPath), width: 72, height: 72, fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => _fallbackThumb(colorScheme)),
                 )
               else
-                Container(
-                  width: 72,
-                  height: 72,
-                  decoration: BoxDecoration(
-                    color: colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Center(
-                    child: Text(config.icon, style: const TextStyle(fontSize: 28)),
-                  ),
-                ),
+                _fallbackThumb(colorScheme),
               const SizedBox(width: 14),
               // 内容
               Expanded(
@@ -62,6 +54,9 @@ class ReviewCard extends StatelessWidget {
                   children: [
                     Row(
                       children: [
+                        // 分类图标在标题左边
+                        Text(catIcon, style: const TextStyle(fontSize: 16)),
+                        const SizedBox(width: 4),
                         Expanded(
                           child: Text(
                             item.title,
@@ -71,22 +66,6 @@ class ReviewCard extends StatelessWidget {
                                 .textTheme
                                 .titleSmall
                                 ?.copyWith(fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                        Container(
-                          padding:
-                              const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: colorScheme.primaryContainer,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            config.name,
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: colorScheme.onPrimaryContainer,
-                              fontWeight: FontWeight.w500,
-                            ),
                           ),
                         ),
                       ],
@@ -133,31 +112,17 @@ class ReviewCard extends StatelessWidget {
     );
   }
 
-  Widget _buildImage(BuildContext context, String path, ColorScheme colorScheme) {
-    final file = File(path);
-    if (!file.existsSync()) {
-      return Container(
-        width: 72,
-        height: 72,
-        decoration: BoxDecoration(
-          color: colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Icon(Icons.broken_image_outlined,
-            color: colorScheme.outline.withValues(alpha: 0.5)),
-      );
-    }
-    return Image.file(file, width: 72, height: 72, fit: BoxFit.cover,
-        errorBuilder: (_, _, _) => Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(Icons.broken_image_outlined,
-                  color: colorScheme.outline.withValues(alpha: 0.5)),
-            ));
+  /// 无图片时的占位缩略图
+  Widget _fallbackThumb(ColorScheme colorScheme) {
+    return Container(
+      width: 72,
+      height: 72,
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Icon(Icons.image_outlined, size: 28, color: colorScheme.outline.withValues(alpha: 0.4)),
+    );
   }
 
   Widget _worthBadge(BuildContext context, String text, Color color) {

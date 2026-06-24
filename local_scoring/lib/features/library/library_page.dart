@@ -1,6 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:uuid/uuid.dart';
 
+import '../../data/models/evaluation.dart';
 import '../../data/models/review_item.dart';
 import '../../providers/review_provider.dart';
 import '../../shared/widgets/empty_state.dart';
@@ -27,13 +31,13 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
   SortMode _sortMode = SortMode.time;
   bool _isTimelineMode = false;
   String? _expandedId;
+  final _evalTextController = TextEditingController(); // 新增评价输入
   final _searchController = TextEditingController();
-  final _annotationController = TextEditingController();
 
   @override
   void dispose() {
     _searchController.dispose();
-    _annotationController.dispose();
+    _evalTextController.dispose();
     super.dispose();
   }
 
@@ -86,10 +90,10 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
         centerTitle: false,
         actions: [
           // 视图切换
-          IconButton(
+          TextButton.icon(
             icon: Icon(
                 _isTimelineMode ? Icons.view_list : Icons.timeline),
-            tooltip: _isTimelineMode ? '列表视图' : '时间线视图',
+            label: Text(_isTimelineMode ? '列表' : '时间线'),
             onPressed: () =>
                 setState(() => _isTimelineMode = !_isTimelineMode),
           ),
@@ -228,9 +232,29 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
       itemCount: items.length,
       itemBuilder: (_, i) {
         final item = items[i];
-        return ReviewCard(
-          item: item,
-          onTap: () => _navigateToDetail(item.id),
+        return SwipeActionWrapper(
+          onDelete: () async {
+            final confirmed = await showDialog<bool>(
+              context: context,
+              builder: (c) => AlertDialog(
+                title: const Text('删除评分'),
+                content: Text('确认删除「${item.title}」？\n删除后可在回收站恢复。'),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
+                  FilledButton(onPressed: () => Navigator.pop(c, true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('删除')),
+                ],
+              ),
+            );
+            if (confirmed == true && mounted) {
+              await ref.read(reviewListProvider.notifier).softDeleteItem(item.id);
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已移入回收站')));
+            }
+          },
+          onEdit: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReviewFormPage(existingItem: item))),
+          child: ReviewCard(
+            item: item,
+            onTap: () => _navigateToDetail(item.id),
+          ),
         );
       },
     );
@@ -264,6 +288,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
             ...groupItems.map((item) {
               final isExpanded = _expandedId == item.id;
               return SwipeActionWrapper(
+                buttonHeight: 44, // 匹配未展开面板高度
                 onDelete: () async {
                   final confirmed = await showDialog<bool>(
                     context: context,
@@ -298,6 +323,9 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
 
   Widget _buildExpandedContent(
       ReviewItem item, ColorScheme colorScheme) {
+    final evals = item.evaluations;
+    if (evals.isEmpty) return const SizedBox.shrink();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -342,34 +370,88 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
                 .toList(),
           ),
         ],
-        // 批注列表（所有评价的批注汇总）
-        ...() {
-          final allAnnots =
-              item.evaluations.expand((e) => e.annotations).toList();
-          if (allAnnots.isEmpty) return <Widget>[];
-          return <Widget>[
-            const SizedBox(height: 10),
-            Text('批注记录',
-                style: Theme.of(context)
-                    .textTheme
-                    .labelMedium
-                    ?.copyWith(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 6),
-            ...allAnnots.map((a) => AnnotationCard(
-                  text: a.text,
-                  createdAt: a.createdAt,
-                )),
-          ];
-        }(),
-        // 添加批注
+        // 历史评价列表（无批注）
+        const SizedBox(height: 12),
+        Text('历史评价',
+            style: Theme.of(context)
+                .textTheme
+                .labelMedium
+                ?.copyWith(fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
+        ...evals.asMap().entries.map((entry) {
+          final i = entry.key;
+          final e = entry.value;
+          final isLatest = i == 0;
+          return InkWell(
+            onTap: () => _navigateToDetailWithEval(item.id, e.id),
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: colorScheme.surface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                    color: colorScheme.outlineVariant.withValues(alpha: 0.3)),
+              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                // 评价头部：日期 + 分数 + 最新标记
+                Row(children: [
+                  Icon(Icons.access_time, size: 13, color: colorScheme.outline),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${e.createdAt.month.toString().padLeft(2, '0')}-${e.createdAt.day.toString().padLeft(2, '0')} ${e.createdAt.hour.toString().padLeft(2, '0')}:${e.createdAt.minute.toString().padLeft(2, '0')}',
+                    style: TextStyle(fontSize: 11, color: colorScheme.outline),
+                  ),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: _scoreColor(e.score).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text('${e.score.toStringAsFixed(1)} 分',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _scoreColor(e.score))),
+                  ),
+                  if (isLatest) ...[
+                    const SizedBox(width: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(color: colorScheme.primary.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(4)),
+                      child: Text('最新', style: TextStyle(fontSize: 9, color: colorScheme.primary, fontWeight: FontWeight.w600)),
+                    ),
+                  ],
+                ]),
+                // 评价文字
+                if (e.reviewText.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(e.reviewText, style: TextStyle(fontSize: 13, color: colorScheme.onSurface.withValues(alpha: 0.7))),
+                ],
+                // 评价图片
+                if (e.imagePaths.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Wrap(spacing: 4, runSpacing: 4, children: e.imagePaths.map((p) {
+                    final f = File(p);
+                    return ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: SizedBox(width: 36, height: 36,
+                          child: f.existsSync() ? Image.file(f, fit: BoxFit.cover) : Icon(Icons.broken_image, size: 16, color: colorScheme.outline)),
+                    );
+                  }).toList()),
+                ],
+              ]),
+            ),
+          );
+        }),
+        // 新增评价输入
+        const SizedBox(height: 4),
         Row(
           children: [
             Expanded(
               child: TextField(
-                controller: _annotationController,
+                controller: _evalTextController,
                 decoration: InputDecoration(
-                  hintText: '添加批注...',
+                  hintText: '新增评价...',
                   isDense: true,
                   contentPadding: const EdgeInsets.symmetric(
                       horizontal: 12, vertical: 8),
@@ -382,12 +464,12 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
             const SizedBox(width: 8),
             IconButton.filled(
               icon: const Icon(Icons.send, size: 18),
-              onPressed: () => _addAnnotation(item),
+              onPressed: () => _addEvaluation(item),
             ),
           ],
         ),
         const SizedBox(height: 8),
-        // 查看详情 / 编辑
+        // 查看详情
         Row(
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
@@ -400,6 +482,12 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
         ),
       ],
     );
+  }
+
+  Color _scoreColor(double s) {
+    if (s >= 8) return const Color(0xFF4CAF50);
+    if (s >= 6) return const Color(0xFFFFA726);
+    return const Color(0xFFEF5350);
   }
 
   Widget _miniBadge(String text, Color color) {
@@ -420,18 +508,24 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
     );
   }
 
-  Future<void> _addAnnotation(ReviewItem item) async {
-    final text = _annotationController.text.trim();
+  /// 快速新增一条评价（仅文字，评分默认 5.0）
+  Future<void> _addEvaluation(ReviewItem item) async {
+    final text = _evalTextController.text.trim();
     if (text.isEmpty) return;
-    final evalId = item.latestEvaluation?.id;
-    if (evalId == null) return;
+    final eval = Evaluation(
+      id: const Uuid().v4(),
+      score: 5.0,
+      reviewText: text,
+      dimensions: Map.from(item.dimensions),
+      createdAt: DateTime.now(),
+    );
     final success = await ref
         .read(reviewListProvider.notifier)
-        .addAnnotation(item.id, evalId, text);
+        .addEvaluation(item.id, eval);
     if (success && mounted) {
-      _annotationController.clear();
+      _evalTextController.clear();
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('批注已添加')));
+          .showSnackBar(const SnackBar(content: Text('评价已添加')));
     }
   }
 
@@ -443,6 +537,12 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
   void _navigateToDetail(String id) {
     Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => ReviewDetailPage(reviewId: id)));
+  }
+
+  /// 跳转详情页并定位到指定评价
+  void _navigateToDetailWithEval(String reviewId, String evalId) {
+    Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => ReviewDetailPage(reviewId: reviewId, scrollToEvalId: evalId)));
   }
 }
 

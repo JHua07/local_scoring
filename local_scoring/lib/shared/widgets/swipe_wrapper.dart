@@ -6,7 +6,8 @@ class SwipeActionWrapper extends StatefulWidget {
   final VoidCallback? onEdit;
   final Widget child;
   final double buttonWidth;
-  const SwipeActionWrapper({super.key, required this.onDelete, this.onEdit, required this.child, this.buttonWidth = 56});
+  final double? buttonHeight; // 固定按钮高度，null=撑满
+  const SwipeActionWrapper({super.key, required this.onDelete, this.onEdit, required this.child, this.buttonWidth = 56, this.buttonHeight});
   @override
   State<SwipeActionWrapper> createState() => _SwipeActionWrapperState();
 }
@@ -32,11 +33,14 @@ class _SwipeActionWrapperState extends State<SwipeActionWrapper> {
   @override
   Widget build(BuildContext context) {
     final bw = widget.buttonWidth;
+    final btnH = widget.buttonHeight;
     return GestureDetector(
       onHorizontalDragUpdate: _onDragUpdate,
       onHorizontalDragEnd: _onDragEnd,
       child: Stack(clipBehavior: Clip.none, children: [
-        Positioned(right: 0, top: 4, bottom: 4, child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Positioned(right: 0, top: 4, bottom: 4, child: SizedBox(
+          height: btnH, // 可指定固定高度
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
           if (widget.onEdit != null)
             Opacity(
               opacity: _opa(1), // 编辑在左边 → 后浮现
@@ -53,7 +57,7 @@ class _SwipeActionWrapperState extends State<SwipeActionWrapper> {
               child: ClipRRect(borderRadius: BorderRadius.circular(14), child: Container(width: bw, height: double.infinity, color: const Color(0xFFA1887F).withValues(alpha: 0.85), alignment: Alignment.center, child: const Icon(Icons.delete_outline, color: Colors.white, size: 22))),
             ),
           ),
-        ])),
+        ]))),
         Transform.translate(offset: Offset(_dx, 0), child: widget.child),
       ]),
     );

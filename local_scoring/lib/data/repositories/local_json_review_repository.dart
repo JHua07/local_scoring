@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:archive/archive.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -303,5 +305,121 @@ class LocalJsonReviewRepository implements ReviewRepository {
     final file = await _reviewsFileRef;
     if (!await file.exists()) return '';
     return file.path;
+  }
+
+  // ========== 备份 / 恢复（ZIP 压缩包，按分类分文件夹） ==========
+
+  /// 导出完整备份 zip，结构：
+  ///   templates.json
+  ///   [分类名]/data.json
+  ///   [分类名]/images/xxx.jpg
+  @override
+  Future<String> exportBackup(String outputPath) async {
+    final archive = Archive();
+
+    // 1) 模板
+    final tFile = await _templatesFileRef;
+    if (await tFile.exists()) {
+      final bytes = await tFile.readAsBytes();
+      archive.addFile(ArchiveFile('templates.json', bytes.length, bytes));
+    }
+
+    // 2) 全量评分（含已删除）
+    final allReviews = await _getAllRaw();
+    // 按分类名分组
+    final catNames = <String>{};
+    for (final r in allReviews) {
+      catNames.add(r.category);
+    }
+
+    for (final cat in catNames) {
+      final catReviews =
+          allReviews.where((r) => r.category == cat).toList();
+      final jsonStr = ReviewItem.listToJson(catReviews);
+      final jsonBytes = utf8.encode(jsonStr);
+      archive.addFile(
+          ArchiveFile('$cat/data.json', jsonBytes.length, jsonBytes));
+
+      // 收集该分类所有图片
+      final imgPaths = <String>{};
+      for (final r in catReviews) {
+        for (final e in r.evaluations) {
+          imgPaths.addAll(e.imagePaths);
+        }
+      }
+      for (final imgPath in imgPaths) {
+        final f = File(imgPath);
+        if (await f.exists()) {
+          final imgBytes = await f.readAsBytes();
+          final name = p.basename(imgPath);
+          archive.addFile(
+              ArchiveFile('$cat/images/$name', imgBytes.length, imgBytes));
+        }
+      }
+    }
+
+    // 3) 写入 zip
+    final zipData = ZipEncoder().encode(archive);
+    final outFile = File(outputPath);
+    await outFile.writeAsBytes(zipData);
+    return outputPath;
+  }
+
+  /// 从备份 zip 恢复数据，merge 模式：不清空现有数据，追加导入
+  @override
+  Future<int> importBackup(String zipPath) async {
+    final zipBytes = await File(zipPath).readAsBytes();
+    final archive = ZipDecoder().decodeBytes(zipBytes);
+
+    var importedCount = 0;
+
+    // 1) 模板
+    final tEntry = archive.files.firstWhere(
+        (f) => f.name == 'templates.json',
+        orElse: () => ArchiveFile('', 0, []));
+    if (tEntry.name.isNotEmpty) {
+      final content = utf8.decode(tEntry.content as List<int>);
+      final templates = ScoringTemplate.listFromJson(content);
+      final existing = await getAllTemplates();
+      final existingIds = existing.map((t) => t.id).toSet();
+      for (final t in templates) {
+        if (!existingIds.contains(t.id)) {
+          await addTemplate(t);
+        }
+      }
+    }
+
+    // 2) 遍历分类文件夹
+    for (final file in archive.files) {
+      if (file.name.endsWith('/data.json')) {
+        final cat = file.name.split('/').first;
+        final content = utf8.decode(file.content as List<int>);
+        final reviews = ReviewItem.listFromJson(content);
+        final existing = await _getAllRaw();
+        final existingIds = existing.map((r) => r.id).toSet();
+
+        for (final r in reviews) {
+          if (!existingIds.contains(r.id)) {
+            await add(r);
+            importedCount++;
+          }
+        }
+
+        // 恢复该分类图片
+        final imgPrefix = '$cat/images/';
+        for (final imgFile in archive.files) {
+          if (!imgFile.isFile || !imgFile.name.startsWith(imgPrefix)) continue;
+          final imgName = p.basename(imgFile.name);
+          final imgDir = await _imagesDirRef;
+          final destPath = p.join(imgDir.path, imgName);
+          if (!await File(destPath).exists()) {
+            await File(destPath)
+                .writeAsBytes(imgFile.content as List<int>);
+          }
+        }
+      }
+    }
+
+    return importedCount;
   }
 }

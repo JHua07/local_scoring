@@ -6,6 +6,7 @@ import 'features/library/library_page.dart';
 import 'features/ranking/ranking_page.dart';
 import 'features/settings/settings_page.dart';
 import 'providers/review_provider.dart';
+import 'providers/theme_provider.dart';
 
 class PrivateReviewApp extends ConsumerWidget {
   const PrivateReviewApp({super.key});
@@ -18,35 +19,44 @@ class PrivateReviewApp extends ConsumerWidget {
       ref.read(templateListProvider.notifier).loadAll();
     });
 
+    final themeMode = ref.watch(themeProvider);
+
     return MaterialApp(
       title: '私人评分',
       debugShowCheckedModeBanner: false,
-      theme: _buildLightTheme(),
+      themeMode: themeMode,
+      theme: _buildTheme(Brightness.light),
+      darkTheme: _buildTheme(Brightness.dark),
       home: const MainShell(),
     );
   }
 
-  ThemeData _buildLightTheme() {
+  ThemeData _buildTheme(Brightness brightness) {
     const seedColor = Color(0xFF5C6BC0); // Indigo
+    final isDark = brightness == Brightness.dark;
     final colorScheme = ColorScheme.fromSeed(
       seedColor: seedColor,
-      brightness: Brightness.light,
+      brightness: brightness,
     );
 
     return ThemeData(
       useMaterial3: true,
       colorScheme: colorScheme,
-      scaffoldBackgroundColor: const Color(0xFFF8F7F4),
+      scaffoldBackgroundColor: isDark
+          ? colorScheme.surface
+          : const Color(0xFFF8F7F4),
       cardTheme: CardThemeData(
         elevation: 0,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        color: Colors.white,
+        color: isDark ? colorScheme.surfaceContainer : Colors.white,
       ),
       appBarTheme: AppBarTheme(
         centerTitle: false,
         elevation: 0,
         scrolledUnderElevation: 1,
-        backgroundColor: const Color(0xFFF8F7F4),
+        backgroundColor: isDark
+            ? colorScheme.surface
+            : const Color(0xFFF8F7F4),
         titleTextStyle: TextStyle(
           color: colorScheme.onSurface,
           fontSize: 20,
@@ -55,7 +65,9 @@ class PrivateReviewApp extends ConsumerWidget {
       ),
       navigationBarTheme: NavigationBarThemeData(
         elevation: 0,
-        backgroundColor: Colors.white,
+        backgroundColor: isDark
+            ? colorScheme.surfaceContainer
+            : Colors.white,
         indicatorColor: colorScheme.primaryContainer,
         labelTextStyle: WidgetStatePropertyAll(
           TextStyle(

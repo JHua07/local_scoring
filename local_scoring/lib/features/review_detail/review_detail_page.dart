@@ -19,8 +19,9 @@ import '../review_form/review_form_page.dart';
 /// 时间线支持：左划编辑删除、展开批注(前5条+加载更多)、新增评分(全屏页)
 class ReviewDetailPage extends ConsumerStatefulWidget {
   final String reviewId;
+  final String? scrollToEvalId; // 跳转后滚动定位到指定评价
 
-  const ReviewDetailPage({super.key, required this.reviewId});
+  const ReviewDetailPage({super.key, required this.reviewId, this.scrollToEvalId});
 
   @override
   ConsumerState<ReviewDetailPage> createState() =>
@@ -362,6 +363,7 @@ class _ReviewDetailPageState extends ConsumerState<ReviewDetailPage> {
           const SizedBox(height: 8),
           _TimelineSection(
             item: item,
+            scrollToEvalId: widget.scrollToEvalId,
             templateDims: templates.isNotEmpty
                 ? tmpl.getTemplateById(templates, item.category).dimensions
                 : const [],
@@ -498,10 +500,11 @@ class _ReviewDetailPageState extends ConsumerState<ReviewDetailPage> {
 class _TimelineSection extends StatefulWidget {
   final ReviewItem item;
   final List<String> templateDims;
+  final String? scrollToEvalId; // 跳转后定位到指定评价
   final Future<void> Function(String evalId, String text) onAddAnnotation;
   final Future<bool> Function(double score, String text, Map<String, double> dimensions) onAddEvaluation;
   final Future<void> Function(String evalId) onDeleteEval;
-  const _TimelineSection({required this.item, required this.templateDims, required this.onAddAnnotation, required this.onAddEvaluation, required this.onDeleteEval});
+  const _TimelineSection({required this.item, required this.templateDims, this.scrollToEvalId, required this.onAddAnnotation, required this.onAddEvaluation, required this.onDeleteEval});
   @override
   State<_TimelineSection> createState() => _TimelineSectionState();
 }
@@ -510,6 +513,7 @@ class _TimelineSectionState extends State<_TimelineSection>
     with SingleTickerProviderStateMixin {
   String? _expandedId;
   late AnimationController _anim;
+  final _rowKeys = <String, GlobalKey>{};
 
   @override
   void initState() {
@@ -518,6 +522,29 @@ class _TimelineSectionState extends State<_TimelineSection>
       vsync: this,
       duration: const Duration(milliseconds: 600),
     )..forward();
+
+    // 为每个评价预生成 GlobalKey
+    for (final e in widget.item.evaluations) {
+      _rowKeys[e.id] = GlobalKey();
+    }
+
+    // 跳转定位：滚动到指定评价
+    if (widget.scrollToEvalId != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollToEval(widget.scrollToEvalId!);
+      });
+    }
+  }
+
+  void _scrollToEval(String evalId) {
+    final key = _rowKeys[evalId];
+    if (key?.currentContext != null) {
+      _expandedId = evalId; // 自动展开目标评价
+      Scrollable.ensureVisible(key!.currentContext!,
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.easeOut,
+          alignment: 0.2);
+    }
   }
 
   @override
@@ -568,6 +595,7 @@ class _TimelineSectionState extends State<_TimelineSection>
             final isExpanded = _expandedId == eval.id;
             final isLast = i == evals.length - 1;
             return _AnimBuilder(
+              key: _rowKeys[eval.id],
               listenable: _anim,
               builder: (context, child) {
                 final t = (_anim.value - i * 0.08).clamp(0.0, 1.0);
@@ -601,7 +629,7 @@ class _TimelineSectionState extends State<_TimelineSection>
 // ═══ 入场动画辅助（staggered fade+slide up）═══
 class _AnimBuilder extends AnimatedWidget {
   final Widget Function(BuildContext, Widget?) builder;
-  const _AnimBuilder({required super.listenable, required this.builder});
+  const _AnimBuilder({super.key, required super.listenable, required this.builder});
   @override
   Widget build(BuildContext context) => builder(context, null);
 }
@@ -655,7 +683,7 @@ class _NodeRow extends StatefulWidget {
 class _NodeRowState extends State<_NodeRow> with SingleTickerProviderStateMixin {
   late AnimationController _expand;
   bool _showInput = false;
-  int _showAnnotCount = 5;
+  int _showAnnotCount = 3; // 折叠态默认展示最近3条批注
   final _ctrl = TextEditingController();
 
   @override
@@ -700,7 +728,7 @@ class _NodeRowState extends State<_NodeRow> with SingleTickerProviderStateMixin 
     final e = widget.eval;
     final dotC = widget.isLatest ? cs.primary : cs.outlineVariant;
     final scoreC = widget.isLatest ? cs.primary : cs.onSurface.withValues(alpha: 0.6);
-    final annots = e.annotations;
+    final annots = e.annotations.reversed.toList(); // 最新在前
     final hasGallery = e.imagePaths.length > 1;
     final shown = annots.length <= _showAnnotCount ? annots : annots.take(_showAnnotCount).toList();
 
@@ -775,8 +803,13 @@ class _NodeRowState extends State<_NodeRow> with SingleTickerProviderStateMixin 
               Text(DateFormat('MM-dd HH:mm').format(a.createdAt), style: TextStyle(fontSize: 10, color: cs.outline)),
             ])),
           ]))),
-          if (annots.length > _showAnnotCount)
-            Padding(padding: const EdgeInsets.only(top: 6), child: TextButton(onPressed: () => setState(() => _showAnnotCount += 5), child: Text('加载更多 (${annots.length - _showAnnotCount} 条)', style: const TextStyle(fontSize: 12)))),
+          if (_showAnnotCount < annots.length)
+            Padding(padding: const EdgeInsets.only(top: 6), child: Row(children: [
+              TextButton(onPressed: () => setState(() => _showAnnotCount += 3), child: Text('加载更多 (${annots.length - _showAnnotCount} 条)', style: const TextStyle(fontSize: 12))),
+              if (_showAnnotCount > 3) TextButton(onPressed: () => setState(() => _showAnnotCount = 3), child: const Text('收起', style: TextStyle(fontSize: 12))),
+            ])),
+          if (_showAnnotCount >= annots.length && _showAnnotCount > 3)
+            Padding(padding: const EdgeInsets.only(top: 6), child: TextButton(onPressed: () => setState(() => _showAnnotCount = 3), child: const Text('收起', style: TextStyle(fontSize: 12)))),
           const SizedBox(height: 6),
           _showInput
               ? Row(children: [

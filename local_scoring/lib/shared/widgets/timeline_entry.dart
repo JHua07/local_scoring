@@ -2,10 +2,10 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
-import '../../core/utils/date_formatters.dart';
+import '../../core/constants/categories.dart';
 import '../../data/models/review_item.dart';
 
-/// 单条时间线条目：左侧日期 + 竖线 + 缩略图 + 分数panel + 摘要
+/// 时间线条目：折叠态=缩略图+分数+标题+分类图标；展开态=历史评价列表
 class TimelineEntry extends StatelessWidget {
   final ReviewItem item;
   final bool isExpanded;
@@ -23,6 +23,8 @@ class TimelineEntry extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final catIcon = getCategoryIcon(item.category);
+    final thumbPath = item.firstImagePath;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 3),
@@ -58,25 +60,20 @@ class TimelineEntry extends StatelessWidget {
                 ),
                 // 竖线
                 Container(width: 2, height: 36, margin: const EdgeInsets.symmetric(horizontal: 10), decoration: BoxDecoration(color: colorScheme.primary.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(1))),
-                // 缩略图
-                if (item.imagePaths.isNotEmpty)
+                // 缩略图（最早一张）
+                if (thumbPath != null && File(thumbPath).existsSync())
                   ClipRRect(
                     borderRadius: BorderRadius.circular(8),
-                    child: SizedBox(
-                      width: 40, height: 40,
-                      child: File(item.imagePaths.first).existsSync()
-                          ? Image.file(File(item.imagePaths.first), fit: BoxFit.cover)
-                          : Icon(Icons.broken_image, size: 20, color: colorScheme.outline.withValues(alpha: 0.5)),
-                    ),
+                    child: SizedBox(width: 40, height: 40, child: Image.file(File(thumbPath), fit: BoxFit.cover)),
                   )
                 else
                   Container(
                     width: 40, height: 40,
                     decoration: BoxDecoration(color: colorScheme.primary.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(8)),
-                    child: Icon(Icons.photo_outlined, size: 20, color: colorScheme.primary.withValues(alpha: 0.3)),
+                    child: Center(child: Text(catIcon, style: const TextStyle(fontSize: 20))),
                   ),
                 const SizedBox(width: 10),
-                // 分数 panel（半透明）
+                // 分数 panel
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
@@ -87,14 +84,15 @@ class TimelineEntry extends StatelessWidget {
                       style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: _scoreColor(item.score))),
                 ),
                 const SizedBox(width: 8),
-                // 标题 + 摘要
+                // 标题 + 分类图标
                 Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
-                    if (item.reviewText.isNotEmpty)
-                      Text(item.reviewText, maxLines: 1, overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: colorScheme.onSurface.withValues(alpha: 0.5))),
+                  child: Row(children: [
+                    Flexible(
+                      child: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(catIcon, style: const TextStyle(fontSize: 16)),
                   ]),
                 ),
                 AnimatedRotation(
@@ -212,7 +210,8 @@ class AnnotationCard extends StatelessWidget {
                 Text(text,
                     style: Theme.of(context).textTheme.bodySmall),
                 const SizedBox(height: 4),
-                Text(formatDateTime(createdAt),
+                Text(
+                    '${createdAt.month.toString().padLeft(2, '0')}-${createdAt.day.toString().padLeft(2, '0')} ${createdAt.hour.toString().padLeft(2, '0')}:${createdAt.minute.toString().padLeft(2, '0')}',
                     style: Theme.of(context)
                         .textTheme
                         .labelSmall

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/utils/score_utils.dart';
 import '../../data/models/review_item.dart';
 import '../../providers/review_provider.dart';
 import '../../shared/widgets/empty_state.dart';
@@ -45,9 +44,10 @@ class _HomePageState extends ConsumerState<HomePage>
             r.createdAt.year == now.year && r.createdAt.month == now.month)
         .toList();
     final monthCount = thisMonth.length;
-    final avgScore = items.isNotEmpty
-        ? items.map((r) => r.score).reduce((a, b) => a + b) / items.length
-        : 0.0;
+    /// 最近一次添加距今天数（不足24h按小时计）
+    final lastAdded = items.isNotEmpty
+        ? _relativeTime(items.first.createdAt, now)
+        : '--';
     final monthBest = thisMonth.isNotEmpty
         ? thisMonth
             .reduce((a, b) => a.score > b.score ? a : b)
@@ -97,7 +97,9 @@ class _HomePageState extends ConsumerState<HomePage>
                       ),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Row(
+                        child: IntrinsicHeight(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             _StatCard(
                               label: '总记录',
@@ -114,12 +116,13 @@ class _HomePageState extends ConsumerState<HomePage>
                             ),
                             const SizedBox(width: 10),
                             _StatCard(
-                              label: '平均分',
-                              value: formatScore(avgScore),
-                              icon: Icons.star_outline,
+                              label: '上次添加',
+                              value: lastAdded,
+                              icon: Icons.schedule,
                               color: const Color(0xFFFFA726),
                             ),
                           ],
+                        ),
                         ),
                       ),
 
@@ -198,6 +201,15 @@ class _HomePageState extends ConsumerState<HomePage>
       MaterialPageRoute(
           builder: (_) => ReviewDetailPage(reviewId: item.id)),
     );
+  }
+
+  /// 计算相对时间（用于"上次添加"显示）
+  static String _relativeTime(DateTime dt, DateTime now) {
+    final diff = now.difference(dt);
+    if (diff.inMinutes < 60) return '${diff.inMinutes}分钟前';
+    if (diff.inHours < 24) return '${diff.inHours}小时前';
+    if (diff.inDays < 30) return '${diff.inDays}天前';
+    return '${(diff.inDays / 30).floor()}月前';
   }
 }
 

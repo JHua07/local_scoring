@@ -1,8 +1,13 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
+import 'package:path/path.dart' as p;
 
 import '../../data/repositories/local_json_review_repository.dart';
 import '../../providers/review_provider.dart';
+import '../../providers/theme_provider.dart';
+import 'sync_settings_page.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -80,11 +85,50 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
           const SizedBox(height: 28),
 
+          // 主题设置
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: Text(
+              '外观',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleSmall
+                  ?.copyWith(fontWeight: FontWeight.w600),
+            ),
+          ),
+          _buildThemeSelector(context),
+
+          const SizedBox(height: 28),
+
+          // 数据同步
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: Text(
+              '数据同步',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleSmall
+                  ?.copyWith(fontWeight: FontWeight.w600),
+            ),
+          ),
+          _ActionCard(
+            icon: Icons.sync,
+            title: '服务器同步',
+            subtitle: '连接自建服务器，上传和拉取数据',
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SyncSettingsPage()),
+              );
+            },
+          ),
+
+          const SizedBox(height: 28),
+
           // 操作
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
             child: Text(
-              '数据操作',
+              '数据备份',
               style: Theme.of(
                 context,
               ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
@@ -92,19 +136,16 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           ),
           _ActionCard(
             icon: Icons.file_download_outlined,
-            title: '导出 JSON 备份',
-            subtitle: '将评分数据导出为 JSON 文件',
-            onTap: () => _exportJson(context),
+            title: '导出备份（ZIP）',
+            subtitle: '按分类打包评分、评价和图片为压缩包',
+            onTap: () => _exportBackup(context),
           ),
           const SizedBox(height: 8),
           _ActionCard(
             icon: Icons.file_upload_outlined,
-            title: '导入 JSON 备份',
-            subtitle: '从 JSON 文件恢复评分数据（待实现）',
-            onTap: () {
-              ScaffoldMessenger.of(context)
-                  .showSnackBar(const SnackBar(content: Text('导入功能将在后续版本中实现')));
-            },
+            title: '导入备份',
+            subtitle: '从压缩包恢复数据（不覆盖已有记录）',
+            onTap: () => _importBackup(context),
           ),
           const SizedBox(height: 8),
           _RecycleBinCard(
@@ -151,15 +192,63 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     );
   }
 
-  Future<void> _exportJson(BuildContext context) async {
+  Widget _buildThemeSelector(BuildContext context) {
+    final currentTheme = ref.watch(themeProvider);
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHighest.withValues(alpha: 0.4),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          children: ThemeMode.values.map((mode) {
+            final isSelected = currentTheme == mode;
+            final (icon, label) = switch (mode) {
+              ThemeMode.light => (Icons.light_mode, '浅色模式'),
+              ThemeMode.dark => (Icons.dark_mode, '暗色模式'),
+              ThemeMode.system => (Icons.settings_brightness, '跟随系统'),
+            };
+            return ListTile(
+              leading: Icon(icon, color: isSelected ? cs.primary : cs.outline),
+              title: Text(label,
+                  style: TextStyle(
+                      fontWeight:
+                          isSelected ? FontWeight.w600 : FontWeight.normal)),
+              trailing: isSelected
+                  ? Icon(Icons.check, color: cs.primary)
+                  : null,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
+              onTap: () =>
+                  ref.read(themeProvider.notifier).setTheme(mode),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _exportBackup(BuildContext context) async {
     try {
-      final path = await ref.read(reviewListProvider.notifier).exportJson();
-      if (path != null && path.isNotEmpty && mounted) {
+      // 让用户选择导出目录
+      final dir = await FilePicker.platform.getDirectoryPath();
+      if (dir == null || !mounted) return;
+
+      final now = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+      final zipPath = p.join(dir, 'private_review_backup_$now.zip');
+
+      final repo =
+          ref.read(reviewRepositoryProvider) as LocalJsonReviewRepository;
+      final resultPath = await repo.exportBackup(zipPath);
+
+      if (mounted) {
         showDialog(
           context: context,
           builder: (ctx) => AlertDialog(
             title: const Text('导出成功'),
-            content: SelectableText('备份文件路径：\n$path'),
+            content: SelectableText('备份文件已保存到：\n$resultPath'),
             actions: [
               FilledButton(
                 onPressed: () => Navigator.pop(ctx),
@@ -168,18 +257,67 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             ],
           ),
         );
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('暂无数据可导出')));
-        }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('导出失败：$e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('导出失败：$e')));
+      }
+    }
+  }
+
+  Future<void> _importBackup(BuildContext context) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['zip'],
+      );
+      if (result == null || result.files.isEmpty || !mounted) return;
+      final zipPath = result.files.single.path;
+      if (zipPath == null) return;
+
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => const AlertDialog(
+          title: Text('导入中...'),
+          content: Row(children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 16),
+            Text('正在恢复数据...'),
+          ]),
+        ),
+      );
+
+      final repo =
+          ref.read(reviewRepositoryProvider) as LocalJsonReviewRepository;
+      final count = await repo.importBackup(zipPath);
+
+      await ref.read(reviewListProvider.notifier).loadAll();
+      await _loadImageCount();
+
+      if (mounted) {
+        Navigator.pop(context); // dismiss loading dialog
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('导入完成'),
+            content: Text('成功导入 $count 条新记录。'),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('确定'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        // dismiss loading if still showing
+        Navigator.of(context).popUntil((route) => route.isFirst);
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('导入失败：$e')));
       }
     }
   }

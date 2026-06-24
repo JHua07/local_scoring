@@ -39,6 +39,14 @@ class ReviewItem {
   String get reviewText => latestEvaluation?.reviewText ?? '';
   List<String> get imagePaths => latestEvaluation?.imagePaths ?? [];
 
+  /// 最早一次上传的图片路径（用于缩略图）
+  String? get firstImagePath {
+    for (final e in evaluations.reversed) {
+      if (e.imagePaths.isNotEmpty) return e.imagePaths.first;
+    }
+    return null;
+  }
+
   ReviewItem copyWith({
     String? id,
     String? title,
