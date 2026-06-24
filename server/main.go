@@ -306,7 +306,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 // ==================== 入口 ====================
 
 func main() {
-	port := flag.String("port", "8080", "listen port")
+	port := flag.String("port", "92177", "listen port")
 	dataDir := flag.String("data", "./data", "data directory")
 	flag.Parse()
 
