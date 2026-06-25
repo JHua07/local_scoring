@@ -353,6 +353,25 @@ func backupDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, apiResponse{"ok": false, "message": err.Error()})
 		return
 	}
+	if !fileExisted {
+		if _, err := db.Exec("DELETE FROM backups WHERE filename = ?", filename); err != nil {
+			writeJSON(w, http.StatusInternalServerError, apiResponse{"ok": false, "message": err.Error()})
+			return
+		}
+		backups, _ := listBackups()
+		writeJSON(w, http.StatusNotFound, apiResponse{
+			"ok":            false,
+			"filename":      filename,
+			"message":       "backup file not found",
+			"fileExisted":   false,
+			"fileDeleted":   false,
+			"backups":       backups,
+			"serverVersion": serverVersion,
+			"dataDir":       dataDir,
+			"backupDir":     backupDir(),
+		})
+		return
+	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		writeJSON(w, http.StatusInternalServerError, apiResponse{"ok": false, "message": err.Error()})
 		return

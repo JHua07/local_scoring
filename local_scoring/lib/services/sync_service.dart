@@ -424,6 +424,45 @@ class SyncService {
     }
   }
 
+  Future<List<Map<String, dynamic>>> debugBackups() async {
+    try {
+      final resp = await _get('/api/sync/debug');
+      debugPrint(
+        'debugBackups: HTTP ${resp.statusCode}, '
+        'response=${_shortResponseBody(resp)}',
+      );
+      if (resp.statusCode == 200) {
+        final decoded = jsonDecode(resp.body);
+        if (decoded is Map && decoded['files'] is List) {
+          return (decoded['files'] as List).map(_normalizeBackupEntry).toList();
+        }
+        final list = _extractBackupList(decoded);
+        if (list != null) {
+          return list.map(_normalizeBackupEntry).toList();
+        }
+      }
+    } catch (e) {
+      debugPrint('debugBackups error: $e');
+    }
+    return [];
+  }
+
+  Future<List<Map<String, dynamic>>> _filterAvailableBackups(
+    List<Map<String, dynamic>> backups,
+  ) async {
+    final available = <Map<String, dynamic>>[];
+    for (final backup in backups) {
+      final filename = backup['filename']?.toString() ?? '';
+      if (filename.isEmpty) continue;
+      if (await backupStillAvailable(filename)) {
+        available.add(backup);
+      } else {
+        debugPrint('listBackups: filtered missing backup $filename');
+      }
+    }
+    return available;
+  }
+
   Future<File?> _downloadZipToPath(
     String path,
     String savePath, {
@@ -474,12 +513,17 @@ class SyncService {
   List<dynamic>? _extractBackupList(dynamic decoded) {
     if (decoded is List) return decoded;
     if (decoded is Map) {
+      List<dynamic>? emptyList;
       for (final key in ['backups', 'items', 'data', 'snapshots', 'files']) {
         final value = decoded[key];
-        if (value is List) return value;
+        if (value is List) {
+          if (value.isNotEmpty) return value;
+          emptyList ??= value;
+        }
       }
       final result = decoded['result'];
       if (result != null) return _extractBackupList(result);
+      if (emptyList != null) return emptyList;
     }
     return null;
   }
@@ -647,6 +691,7 @@ class SyncService {
 
   /// 列出服务器上所有备份
   Future<List<Map<String, dynamic>>> listBackups() async {
+    var shouldTryDebug = false;
     try {
       final resp = await _get('/api/backup/list');
       if (resp.statusCode == 200) {
@@ -660,26 +705,31 @@ class SyncService {
         if (list != null) {
           debugPrint('listBackups: got ${list.length} entries');
           final normalized = list.map(_normalizeBackupEntry).toList();
-          if (normalized.isNotEmpty) return normalized;
+          if (normalized.isNotEmpty) {
+            return _filterAvailableBackups(normalized);
+          }
 
           final fallback = _extractBackupEntry(decoded);
           if (fallback != null) {
             debugPrint('listBackups: fallback to latest backup from list body');
-            return [_normalizeBackupEntry(fallback)];
+            return _filterAvailableBackups([_normalizeBackupEntry(fallback)]);
           }
+          shouldTryDebug = true;
         }
         debugPrint('listBackups: unexpected type ${decoded.runtimeType}');
       }
       debugPrint('listBackups: HTTP ${resp.statusCode}');
+      shouldTryDebug = true;
     } catch (e) {
       debugPrint('listBackups error: $e');
+      shouldTryDebug = true;
     }
-    final latest = await checkLatestBackup();
-    if (latest != null && latest.isNotEmpty) {
-      debugPrint('listBackups: fallback to /api/sync/check latest=$latest');
-      return [
-        {'filename': latest, 'createdAt': '最新备份'},
-      ];
+    if (shouldTryDebug) {
+      final debugList = await debugBackups();
+      if (debugList.isNotEmpty) {
+        debugPrint('listBackups: fallback to /api/sync/debug');
+        return _filterAvailableBackups(debugList);
+      }
     }
     return [];
   }
