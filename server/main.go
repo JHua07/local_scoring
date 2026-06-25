@@ -596,6 +596,9 @@ func listBackups() ([]backupInfo, error) {
 	}
 
 	sort.SliceStable(list, func(i, j int) bool {
+		if list[i].CreatedAt == list[j].CreatedAt {
+			return list[i].Filename > list[j].Filename
+		}
 		return list[i].CreatedAt > list[j].CreatedAt
 	})
 	return list, nil
@@ -624,7 +627,7 @@ func nextBackupFilename(now time.Time) (string, error) {
 	if err := os.MkdirAll(backupDir(), 0755); err != nil {
 		return "", err
 	}
-	base := fmt.Sprintf("backup_%s", now.Format("20060102_150405"))
+	base := fmt.Sprintf("backup_%s_%09d", now.Format("20060102_150405"), now.Nanosecond())
 	for i := 0; i < 1000; i++ {
 		name := base + ".zip"
 		if i > 0 {

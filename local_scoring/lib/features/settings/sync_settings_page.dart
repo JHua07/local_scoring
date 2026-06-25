@@ -318,7 +318,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
       final count = await repo.importBackup(zip.path, replaceExisting: true);
       await ref.read(reviewListProvider.notifier).loadAll();
       await ref.read(templateListProvider.notifier).loadAll();
-      await svc.markPulledBackup(latestBackup);
+      await svc.markPulledBackup(latestBackup ?? await svc.checkLatestBackup());
       _status = '✅ 恢复完成，导入 $count 条';
       try { await zip.delete(); } catch (_) {}
     } catch (e) { _status = '❌ $e'; }
@@ -339,8 +339,14 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
       }
       final size = await zipFile.length();
       debugPrint('push: ZIP size = $size bytes, path = $zipPath');
-      final ok = await ref.read(syncServiceProvider).pushFullBackup(zipFile);
-      _status = ok ? '✅ 推送成功' : '❌ 推送失败';
+      final uploadedBackup =
+          await ref.read(syncServiceProvider).pushFullBackup(zipFile);
+      if (uploadedBackup != null && uploadedBackup.isNotEmpty) {
+        await ref.read(syncServiceProvider).markPulledBackup(uploadedBackup);
+      } else {
+        await ref.read(syncServiceProvider).forgetPulledBackup();
+      }
+      _status = uploadedBackup != null ? '✅ 推送成功' : '❌ 推送失败';
       try { await zipFile.delete(); } catch (_) {}
     } catch (e) { _status = '❌ $e'; debugPrint('push error: $e'); }
     _busy = false; _activeLabel = ''; setState(() {});
@@ -352,8 +358,14 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
       final repo = ref.read(reviewRepositoryProvider) as LocalJsonReviewRepository;
       final zipPath = p.join(Directory.systemTemp.path, 'full_backup_${DateTime.now().millisecondsSinceEpoch}.zip');
       await repo.exportBackup(zipPath);
-      final ok = await ref.read(syncServiceProvider).uploadBackup(File(zipPath));
-      _status = ok ? '✅ 完整备份上传成功' : '❌ 上传失败';
+      final uploadedBackup =
+          await ref.read(syncServiceProvider).uploadBackup(File(zipPath));
+      if (uploadedBackup != null && uploadedBackup.isNotEmpty) {
+        await ref.read(syncServiceProvider).markPulledBackup(uploadedBackup);
+      } else {
+        await ref.read(syncServiceProvider).forgetPulledBackup();
+      }
+      _status = uploadedBackup != null ? '✅ 完整备份上传成功' : '❌ 上传失败';
       try { await File(zipPath).delete(); } catch (_) {}
     } catch (e) { _status = '❌ $e'; }
     _busy = false; _activeLabel = ''; setState(() {});
@@ -363,6 +375,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
   Future<void> _manageBackups() async {
     _busy = true; setState(() {});
     final backups = await ref.read(syncServiceProvider).listBackups();
+    var list = backups;
     _busy = false; setState(() {});
     if (!mounted) return;
 
@@ -370,7 +383,6 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) {
-          var list = backups;
           return AlertDialog(
             title: const Text('云端备份管理'),
             content: SizedBox(
@@ -394,6 +406,13 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                             onPressed: () async {
                               final ok = await ref.read(syncServiceProvider).deleteBackup(name);
                               if (ok) {
+                                if (ref
+                                    .read(syncServiceProvider)
+                                    .isSameLatestBackup(name)) {
+                                  await ref
+                                      .read(syncServiceProvider)
+                                      .forgetPulledBackup();
+                                }
                                 list = list.where((b) => b['filename'] != name).toList();
                                 setDialogState(() {});
                                 _showMsg('已删除');

@@ -304,7 +304,15 @@ class SyncService {
     return true;
   }
 
-  Future<bool> _uploadZip(String path, File zipFile) async {
+  String? _extractUploadedBackup(http.Response resp) {
+    try {
+      return _extractLatestBackup(jsonDecode(resp.body));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String?> _uploadZip(String path, File zipFile) async {
     final uri = Uri.parse('$_baseUrl$path');
     final bytes = await zipFile.readAsBytes();
     final resp = await http
@@ -321,7 +329,8 @@ class SyncService {
       'uploadZip $path: HTTP ${resp.statusCode}, '
       'response=${_shortResponseBody(resp)}',
     );
-    return _responseAccepted(resp);
+    if (!_responseAccepted(resp)) return null;
+    return _extractUploadedBackup(resp) ?? '';
   }
 
   Future<File?> _downloadZipToPath(
@@ -449,15 +458,15 @@ class SyncService {
   }
 
   /// 推送：打包本地完整数据为 ZIP，上传到服务器
-  Future<bool> pushFullBackup(File zipFile) async {
+  Future<String?> pushFullBackup(File zipFile) async {
     try {
-      final syncOk = await _uploadZip('/api/sync/push', zipFile);
-      if (syncOk) return true;
+      final syncBackup = await _uploadZip('/api/sync/push', zipFile);
+      if (syncBackup != null) return syncBackup;
       debugPrint('pushFullBackup: fallback to /api/backup/upload');
       return await uploadBackup(zipFile);
     } catch (e) {
       debugPrint('pushFullBackup: $e');
-      return false;
+      return null;
     }
   }
 
@@ -490,13 +499,13 @@ class SyncService {
   }
 
   /// 上传备份 zip（手动备份用）
-  Future<bool> uploadBackup(File zipFile) async {
+  Future<String?> uploadBackup(File zipFile) async {
     try {
       return await _uploadZip('/api/backup/upload', zipFile);
     } catch (e) {
       debugPrint('uploadBackup: $e');
     }
-    return false;
+    return null;
   }
 
   /// 下载服务器备份 zip（指定文件名，空则最新）
