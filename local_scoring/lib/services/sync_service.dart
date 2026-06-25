@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
@@ -13,6 +14,30 @@ enum BackupInterval { oneHour, sixHours, twelveHours, oneDay, oneWeek }
 
 /// 数据来源
 enum DataSource { local, cloud }
+
+class SyncDiagnostics {
+  const SyncDiagnostics({
+    required this.healthOk,
+    required this.healthStatus,
+    required this.serverVersion,
+    required this.dataDir,
+    required this.backupDir,
+    required this.backupCount,
+    required this.latestBackup,
+    required this.listCount,
+    required this.error,
+  });
+
+  final bool healthOk;
+  final int? healthStatus;
+  final String serverVersion;
+  final String dataDir;
+  final String backupDir;
+  final int backupCount;
+  final String latestBackup;
+  final int listCount;
+  final String error;
+}
 
 /// 同步服务：与自建 sync-server 通信
 class SyncService {
@@ -265,6 +290,19 @@ class SyncService {
         (bytes[2] == 0x03 || bytes[2] == 0x05 || bytes[2] == 0x07);
   }
 
+  int _intValue(dynamic value) {
+    return switch (value) {
+      int v => v,
+      num v => v.toInt(),
+      String v => int.tryParse(v) ?? 0,
+      _ => 0,
+    };
+  }
+
+  String _stringValue(dynamic value) => value?.toString() ?? '';
+
+  String _sha256Hex(List<int> bytes) => crypto.sha256.convert(bytes).toString();
+
   String _shortResponseBody(http.Response resp) {
     final contentType = resp.headers['content-type'] ?? '';
     if (!contentType.contains('json') && !contentType.startsWith('text/')) {
@@ -374,6 +412,26 @@ class SyncService {
     if (filename.isEmpty || !await localZip.exists()) return false;
     try {
       final localBytes = await localZip.readAsBytes();
+      final localSha = _sha256Hex(localBytes);
+      final backups = await listBackups();
+      final entry = backups.cast<Map<String, dynamic>?>().firstWhere(
+        (b) => b?['filename'] == filename,
+        orElse: () => null,
+      );
+      if (entry != null) {
+        final remoteSize = _intValue(entry['size']);
+        final remoteSha = _stringValue(entry['sha256']);
+        final metadataMatches =
+            remoteSize == localBytes.length &&
+            (remoteSha.isEmpty || remoteSha == localSha);
+        debugPrint(
+          'verifyBackupMatches metadata $filename: match=$metadataMatches, '
+          'local=${localBytes.length}/$localSha, '
+          'remote=$remoteSize/$remoteSha',
+        );
+        if (metadataMatches) return true;
+      }
+
       final resp = await http
           .get(
             Uri.parse(
@@ -392,7 +450,7 @@ class SyncService {
           _isSuccessStatus(resp.statusCode) &&
           _looksLikeZip(remoteBytes) &&
           localBytes.length == remoteBytes.length &&
-          listEquals(localBytes, remoteBytes);
+          _sha256Hex(remoteBytes) == localSha;
       debugPrint(
         'verifyBackupMatches $filename: HTTP ${resp.statusCode}, '
         'match=$matches, local=${localBytes.length}, '
@@ -573,6 +631,50 @@ class SyncService {
       return resp.statusCode == 200;
     } catch (_) {
       return false;
+    }
+  }
+
+  Future<SyncDiagnostics> runDiagnostics() async {
+    try {
+      final healthResp = await _get('/api/health');
+      Map<String, dynamic> health = {};
+      if (healthResp.body.isNotEmpty) {
+        final decoded = jsonDecode(healthResp.body);
+        if (decoded is Map) {
+          health = decoded.map((k, v) => MapEntry(k.toString(), v));
+        }
+      }
+
+      final list = await listBackups();
+      final latest = await checkLatestBackup();
+      final serverVersion = _stringValue(health['serverVersion']);
+      final dataDir = _stringValue(health['dataDir']);
+      final backupDir = _stringValue(health['backupDir']);
+      final backupCount = _intValue(health['backupCount']);
+
+      return SyncDiagnostics(
+        healthOk: healthResp.statusCode == 200,
+        healthStatus: healthResp.statusCode,
+        serverVersion: serverVersion,
+        dataDir: dataDir,
+        backupDir: backupDir,
+        backupCount: backupCount == 0 ? list.length : backupCount,
+        latestBackup: latest ?? _stringValue(health['latestBackup']),
+        listCount: list.length,
+        error: '',
+      );
+    } catch (e) {
+      return SyncDiagnostics(
+        healthOk: false,
+        healthStatus: null,
+        serverVersion: '',
+        dataDir: '',
+        backupDir: '',
+        backupCount: 0,
+        latestBackup: '',
+        listCount: 0,
+        error: e.toString(),
+      );
     }
   }
 

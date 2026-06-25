@@ -25,7 +25,7 @@ import (
 const (
 	backupKeep     = 3
 	maxUploadBytes = 512 << 20 // 512 MB
-	serverVersion  = "sync-zip-v3-20260625"
+	serverVersion  = "sync-zip-v4-20260626"
 )
 
 var db *sql.DB
@@ -39,6 +39,16 @@ type backupInfo struct {
 }
 
 type apiResponse map[string]any
+
+type backupSummary struct {
+	Count         int          `json:"count"`
+	LatestBackup  string       `json:"latestBackup,omitempty"`
+	Latest        *backupInfo  `json:"latest,omitempty"`
+	Backups       []backupInfo `json:"backups"`
+	ServerVersion string       `json:"serverVersion"`
+	DataDir       string       `json:"dataDir"`
+	BackupDir     string       `json:"backupDir"`
+}
 
 func initDB(root string) error {
 	if err := os.MkdirAll(root, 0755); err != nil {
@@ -86,12 +96,15 @@ func initDB(root string) error {
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
+	count, latest := quickBackupState()
 	writeJSON(w, http.StatusOK, apiResponse{
 		"ok":            true,
 		"status":        "ok",
 		"serverVersion": serverVersion,
 		"dataDir":       dataDir,
 		"backupDir":     backupDir(),
+		"backupCount":   count,
+		"latestBackup":  latest,
 	})
 }
 
@@ -154,7 +167,13 @@ func saveUploadedBackup(w http.ResponseWriter, r *http.Request, source string) {
 		return
 	}
 	zipPath := filepath.Join(backupDir(), filename)
-	if err := os.WriteFile(zipPath, body, 0644); err != nil {
+	tmpPath := zipPath + ".tmp"
+	defer os.Remove(tmpPath)
+	if err := os.WriteFile(tmpPath, body, 0644); err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiResponse{"ok": false, "message": err.Error()})
+		return
+	}
+	if err := os.Rename(tmpPath, zipPath); err != nil {
 		writeJSON(w, http.StatusInternalServerError, apiResponse{"ok": false, "message": err.Error()})
 		return
 	}
@@ -176,17 +195,23 @@ func saveUploadedBackup(w http.ResponseWriter, r *http.Request, source string) {
 	cleanupOldBackups(backupKeep)
 
 	log.Printf("%s saved: %s (%d bytes)", source, filename, len(body))
-	writeJSON(w, http.StatusOK, apiResponse{
+	resp := apiResponse{
 		"ok":            true,
 		"filename":      filename,
 		"latestBackup":  filename,
+		"backup":        backupInfo{Filename: filename, CreatedAt: createdAt, Size: int64(len(body)), Sha256: sha},
 		"createdAt":     createdAt,
 		"size":          len(body),
 		"sha256":        sha,
 		"serverVersion": serverVersion,
 		"dataDir":       dataDir,
 		"backupDir":     backupDir(),
-	})
+	}
+	if summary, err := currentBackupSummary(); err == nil {
+		resp["count"] = summary.Count
+		resp["backups"] = summary.Backups
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func syncPullHandler(w http.ResponseWriter, r *http.Request) {
@@ -224,6 +249,9 @@ func serveBackupZip(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, apiResponse{"ok": false, "message": "file not found"})
 		return
 	}
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
@@ -235,15 +263,16 @@ func syncCheckHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, apiResponse{"ok": false, "message": "method not allowed"})
 		return
 	}
-	latest, err := latestBackupInfo()
+	summary, err := currentBackupSummary()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, apiResponse{"ok": false, "message": err.Error()})
 		return
 	}
-	if latest == nil {
+	if summary.Latest == nil {
 		writeJSON(w, http.StatusOK, apiResponse{
 			"ok":            true,
 			"hasBackup":     false,
+			"count":         0,
 			"serverVersion": serverVersion,
 			"dataDir":       dataDir,
 			"backupDir":     backupDir(),
@@ -253,11 +282,13 @@ func syncCheckHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, apiResponse{
 		"ok":            true,
 		"hasBackup":     true,
-		"latestBackup":  latest.Filename,
-		"filename":      latest.Filename,
-		"createdAt":     latest.CreatedAt,
-		"size":          latest.Size,
-		"sha256":        latest.Sha256,
+		"count":         summary.Count,
+		"latestBackup":  summary.Latest.Filename,
+		"filename":      summary.Latest.Filename,
+		"latest":        summary.Latest,
+		"createdAt":     summary.Latest.CreatedAt,
+		"size":          summary.Latest.Size,
+		"sha256":        summary.Latest.Sha256,
 		"serverVersion": serverVersion,
 		"dataDir":       dataDir,
 		"backupDir":     backupDir(),
@@ -269,14 +300,17 @@ func backupListHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, apiResponse{"ok": false, "message": "method not allowed"})
 		return
 	}
-	backups, err := listBackups()
+	summary, err := currentBackupSummary()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, apiResponse{"ok": false, "message": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, apiResponse{
 		"ok":            true,
-		"backups":       backups,
+		"count":         summary.Count,
+		"latestBackup":  summary.LatestBackup,
+		"latest":        summary.Latest,
+		"backups":       summary.Backups,
 		"serverVersion": serverVersion,
 		"dataDir":       dataDir,
 		"backupDir":     backupDir(),
@@ -288,7 +322,7 @@ func syncDebugHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, apiResponse{"ok": false, "message": "method not allowed"})
 		return
 	}
-	backups, err := listBackups()
+	summary, err := currentBackupSummary()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, apiResponse{"ok": false, "message": err.Error()})
 		return
@@ -328,7 +362,10 @@ func syncDebugHandler(w http.ResponseWriter, r *http.Request) {
 		"serverVersion": serverVersion,
 		"dataDir":       dataDir,
 		"backupDir":     backupDir(),
-		"backups":       backups,
+		"count":         summary.Count,
+		"latestBackup":  summary.LatestBackup,
+		"latest":        summary.Latest,
+		"backups":       summary.Backups,
 		"files":         files,
 	})
 }
@@ -351,14 +388,17 @@ func backupDeleteHandler(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, apiResponse{"ok": false, "message": err.Error()})
 			return
 		}
-		backups, _ := listBackups()
+		summary, _ := currentBackupSummary()
 		writeJSON(w, http.StatusNotFound, apiResponse{
 			"ok":            false,
 			"filename":      filename,
 			"message":       "backup file not found",
 			"fileExisted":   false,
 			"fileDeleted":   false,
-			"backups":       backups,
+			"count":         summary.Count,
+			"latestBackup":  summary.LatestBackup,
+			"latest":        summary.Latest,
+			"backups":       summary.Backups,
 			"serverVersion": serverVersion,
 			"dataDir":       dataDir,
 			"backupDir":     backupDir(),
@@ -375,7 +415,7 @@ func backupDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, _ := result.RowsAffected()
-	backups, err := listBackups()
+	summary, err := currentBackupSummary()
 	if err != nil {
 		writeJSON(w, http.StatusOK, apiResponse{
 			"ok":          true,
@@ -392,7 +432,10 @@ func backupDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		"fileExisted":   true,
 		"fileDeleted":   true,
 		"deletedRows":   rows,
-		"backups":       backups,
+		"count":         summary.Count,
+		"latestBackup":  summary.LatestBackup,
+		"latest":        summary.Latest,
+		"backups":       summary.Backups,
 		"serverVersion": serverVersion,
 		"dataDir":       dataDir,
 		"backupDir":     backupDir(),
@@ -725,6 +768,34 @@ func latestBackupInfo() (*backupInfo, error) {
 	return &backups[0], nil
 }
 
+func currentBackupSummary() (backupSummary, error) {
+	backups, err := listBackups()
+	if err != nil {
+		return backupSummary{}, err
+	}
+	summary := backupSummary{
+		Count:         len(backups),
+		Backups:       backups,
+		ServerVersion: serverVersion,
+		DataDir:       dataDir,
+		BackupDir:     backupDir(),
+	}
+	if len(backups) > 0 {
+		latest := backups[0]
+		summary.Latest = &latest
+		summary.LatestBackup = latest.Filename
+	}
+	return summary, nil
+}
+
+func quickBackupState() (int, string) {
+	summary, err := currentBackupSummary()
+	if err != nil {
+		return 0, ""
+	}
+	return summary.Count, summary.LatestBackup
+}
+
 func latestBackupFilename() (string, error) {
 	latest, err := latestBackupInfo()
 	if err != nil || latest == nil {
@@ -896,6 +967,7 @@ func main() {
 	mux.HandleFunc("/api/sync/debug", syncDebugHandler)
 	mux.HandleFunc("/api/backup/upload", backupUploadHandler)
 	mux.HandleFunc("/api/backup/list", backupListHandler)
+	mux.HandleFunc("/api/backup/manifest", backupListHandler)
 	mux.HandleFunc("/api/backup/download", backupDownloadHandler)
 	mux.HandleFunc("/api/backup/delete", backupDeleteHandler)
 	mux.HandleFunc("/api/images/download", imageDownloadHandler)

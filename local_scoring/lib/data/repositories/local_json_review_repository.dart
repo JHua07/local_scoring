@@ -156,7 +156,8 @@ class LocalJsonReviewRepository implements ReviewRepository {
         .toList();
     if (expired.isNotEmpty) {
       items.removeWhere(
-          (r) => r.deletedAt != null && r.deletedAt!.isBefore(cutoff));
+        (r) => r.deletedAt != null && r.deletedAt!.isBefore(cutoff),
+      );
       await saveAll(items);
     }
   }
@@ -181,17 +182,22 @@ class LocalJsonReviewRepository implements ReviewRepository {
 
   @override
   Future<void> addAnnotation(
-      String reviewId, String evaluationId, Annotation annotation) async {
+    String reviewId,
+    String evaluationId,
+    Annotation annotation,
+  ) async {
     final items = await _getAllRaw();
     final index = items.indexWhere((r) => r.id == reviewId);
     if (index != -1) {
       final evals = List<Evaluation>.from(items[index].evaluations);
       final evalIndex = evals.indexWhere((e) => e.id == evaluationId);
       if (evalIndex != -1) {
-        final updatedAnnots =
-            List<Annotation>.from(evals[evalIndex].annotations)
-              ..add(annotation);
-        evals[evalIndex] = evals[evalIndex].copyWith(annotations: updatedAnnots);
+        final updatedAnnots = List<Annotation>.from(
+          evals[evalIndex].annotations,
+        )..add(annotation);
+        evals[evalIndex] = evals[evalIndex].copyWith(
+          annotations: updatedAnnots,
+        );
         items[index] = items[index].copyWith(
           evaluations: evals,
           updatedAt: DateTime.now(),
@@ -296,9 +302,9 @@ class LocalJsonReviewRepository implements ReviewRepository {
   ) {
     return item.copyWith(
       evaluations: item.evaluations
-          .map((e) => e.copyWith(
-                imagePaths: e.imagePaths.map(rewrite).toList(),
-              ))
+          .map(
+            (e) => e.copyWith(imagePaths: e.imagePaths.map(rewrite).toList()),
+          )
           .toList(),
     );
   }
@@ -415,6 +421,8 @@ class LocalJsonReviewRepository implements ReviewRepository {
 
     // 2) 全量评分（含已删除）
     final allReviews = await _getAllRaw();
+    final allTemplates = await getAllTemplates();
+    var exportedImageCount = 0;
     // 按分类名分组
     final catNames = <String>{};
     for (final r in allReviews) {
@@ -422,18 +430,20 @@ class LocalJsonReviewRepository implements ReviewRepository {
     }
 
     for (final cat in catNames) {
-      final catReviews =
-          allReviews.where((r) => r.category == cat).toList();
+      final catReviews = allReviews.where((r) => r.category == cat).toList();
       final exportReviews = catReviews
-          .map((r) => _rewriteImagePaths(
-                r,
-                (imagePath) => _backupImagePath(cat, imagePath),
-              ))
+          .map(
+            (r) => _rewriteImagePaths(
+              r,
+              (imagePath) => _backupImagePath(cat, imagePath),
+            ),
+          )
           .toList();
       final jsonStr = ReviewItem.listToJson(exportReviews);
       final jsonBytes = utf8.encode(jsonStr);
       archive.addFile(
-          ArchiveFile('$cat/data.json', jsonBytes.length, jsonBytes));
+        ArchiveFile('$cat/data.json', jsonBytes.length, jsonBytes),
+      );
 
       // 收集该分类所有图片
       final imgPaths = <String>{};
@@ -447,11 +457,25 @@ class LocalJsonReviewRepository implements ReviewRepository {
         if (await f.exists()) {
           final imgBytes = await f.readAsBytes();
           final name = p.basename(imgPath);
+          exportedImageCount++;
           archive.addFile(
-              ArchiveFile('$cat/images/$name', imgBytes.length, imgBytes));
+            ArchiveFile('$cat/images/$name', imgBytes.length, imgBytes),
+          );
         }
       }
     }
+
+    final manifest = jsonEncode({
+      'schema': 'local_scoring_backup_v1',
+      'exportedAt': DateTime.now().toUtc().toIso8601String(),
+      'reviewCount': allReviews.length,
+      'templateCount': allTemplates.length,
+      'imageCount': exportedImageCount,
+    });
+    final manifestBytes = utf8.encode(manifest);
+    archive.addFile(
+      ArchiveFile('manifest.json', manifestBytes.length, manifestBytes),
+    );
 
     // 3) 写入 zip
     final zipData = ZipEncoder().encode(archive);
@@ -486,8 +510,9 @@ class LocalJsonReviewRepository implements ReviewRepository {
     }
 
     final tEntry = archive.files.firstWhere(
-        (f) => f.name == 'templates.json',
-        orElse: () => ArchiveFile('', 0, []));
+      (f) => f.name == 'templates.json',
+      orElse: () => ArchiveFile('', 0, []),
+    );
     if (tEntry.name.isNotEmpty) {
       final content = utf8.decode(tEntry.content as List<int>);
       final templates = ScoringTemplate.listFromJson(content);

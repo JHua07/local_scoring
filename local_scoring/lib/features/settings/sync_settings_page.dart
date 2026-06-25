@@ -108,6 +108,15 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                       subtitle: '查看 data/backups 目录中的 ZIP',
                       onTap: _manageBackups,
                     ),
+                    _divider(),
+                    _tile(
+                      icon: Icons.troubleshoot_rounded,
+                      tint: _green,
+                      title: '同步诊断',
+                      subtitle: '检查服务器版本、备份目录和最新快照',
+                      busyLabel: '诊断',
+                      onTap: _showDiagnostics,
+                    ),
                   ]),
                 ],
                 const SizedBox(height: 22),
@@ -281,7 +290,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
       height: 42,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
-        color: _pageBackground(context),
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.38)),
       ),
@@ -619,47 +628,38 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
     setState(() {});
     try {
       final svc = ref.read(syncServiceProvider);
-      final repo =
-          ref.read(reviewRepositoryProvider) as LocalJsonReviewRepository;
-      final hasLocalReviews = (await repo.getAll()).isNotEmpty;
       final latestBackup = await svc.checkLatestBackup();
-      if (hasLocalReviews && svc.isSameLatestBackup(latestBackup)) {
-        _status = '✅ 已是最新备份';
-        _busy = false;
-        _activeLabel = '';
-        setState(() {});
-        return;
-      }
-      final restoreBackup = svc.preferredRestoreBackup(latestBackup);
-      final savePath = p.join(
-        Directory.systemTemp.path,
-        'pull_${DateTime.now().millisecondsSinceEpoch}.zip',
-      );
-      final zip = await svc.pullFullBackup(savePath, filename: restoreBackup);
-      if (zip == null) {
-        _status = '❌ 服务器暂无备份';
-        _busy = false;
-        _activeLabel = '';
-        setState(() {});
-        return;
-      }
-
-      final count = await repo.importBackup(zip.path, replaceExisting: true);
-      await ref.read(reviewListProvider.notifier).loadAll();
-      await ref.read(templateListProvider.notifier).loadAll();
-      await svc.markPulledBackup(
-        restoreBackup ?? await svc.checkLatestBackup(),
-      );
-      _status = '✅ 恢复完成，导入 $count 条';
-      try {
-        await zip.delete();
-      } catch (_) {}
+      await _restoreBackup(latestBackup);
     } catch (e) {
       _status = '❌ $e';
     }
     _busy = false;
     _activeLabel = '';
     setState(() {});
+  }
+
+  Future<void> _restoreBackup(String? backupName) async {
+    final svc = ref.read(syncServiceProvider);
+    final repo =
+        ref.read(reviewRepositoryProvider) as LocalJsonReviewRepository;
+    final savePath = p.join(
+      Directory.systemTemp.path,
+      'pull_${DateTime.now().millisecondsSinceEpoch}.zip',
+    );
+    final zip = await svc.pullFullBackup(savePath, filename: backupName);
+    if (zip == null) {
+      _status = '❌ 服务器暂无备份';
+      return;
+    }
+
+    final count = await repo.importBackup(zip.path, replaceExisting: true);
+    await ref.read(reviewListProvider.notifier).loadAll();
+    await ref.read(templateListProvider.notifier).loadAll();
+    await svc.markPulledBackup(backupName ?? await svc.checkLatestBackup());
+    _status = '✅ 恢复完成，导入 $count 条';
+    try {
+      await zip.delete();
+    } catch (_) {}
   }
 
   Future<void> _pushToCloud() async {
@@ -748,6 +748,130 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
     _busy = false;
     _activeLabel = '';
     setState(() {});
+  }
+
+  Future<void> _showDiagnostics() async {
+    _busy = true;
+    _activeLabel = '诊断';
+    _status = '正在诊断同步接口...';
+    setState(() {});
+    final diagnostics = await ref.read(syncServiceProvider).runDiagnostics();
+    _busy = false;
+    _activeLabel = '';
+    _status = diagnostics.healthOk ? '✅ 诊断完成' : '❌ 诊断失败';
+    setState(() {});
+    if (!mounted) return;
+
+    showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.fromLTRB(20, 10, 20, 24),
+        decoration: BoxDecoration(
+          color: _groupColor(context),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 38,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.outline.withValues(alpha: 0.28),
+                  borderRadius: BorderRadius.circular(99),
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                _iconBubble(
+                  diagnostics.healthOk
+                      ? Icons.check_circle_rounded
+                      : Icons.error_rounded,
+                  diagnostics.healthOk ? _green : _red,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    diagnostics.healthOk ? '同步接口正常' : '同步接口异常',
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            _diagnosticLine(
+              'HTTP',
+              diagnostics.healthStatus?.toString() ?? '-',
+            ),
+            _diagnosticLine(
+              '版本',
+              diagnostics.serverVersion.isEmpty
+                  ? '-'
+                  : diagnostics.serverVersion,
+            ),
+            _diagnosticLine('备份数量', diagnostics.listCount.toString()),
+            _diagnosticLine(
+              '最新备份',
+              diagnostics.latestBackup.isEmpty ? '-' : diagnostics.latestBackup,
+            ),
+            _diagnosticLine(
+              '数据目录',
+              diagnostics.dataDir.isEmpty ? '-' : diagnostics.dataDir,
+            ),
+            _diagnosticLine(
+              '备份目录',
+              diagnostics.backupDir.isEmpty ? '-' : diagnostics.backupDir,
+            ),
+            if (diagnostics.error.isNotEmpty)
+              _diagnosticLine('错误', diagnostics.error),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _diagnosticLine(String label, String value) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 72,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                color: cs.outline,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          Expanded(
+            child: SelectableText(
+              value,
+              style: const TextStyle(
+                fontSize: 13,
+                fontFamily: 'monospace',
+                letterSpacing: 0,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _manageBackups() async {
@@ -849,6 +973,27 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                             return _backupRow(
                               b,
                               isLatest: i == 0,
+                              onRestore: () async {
+                                final confirmed = await _confirmRestoreBackup(
+                                  ctx,
+                                  name,
+                                );
+                                if (!confirmed) return;
+                                if (!mounted) return;
+                                Navigator.pop(context);
+                                _busy = true;
+                                _activeLabel = '拉取';
+                                _status = '正在恢复 $name...';
+                                setState(() {});
+                                try {
+                                  await _restoreBackup(name);
+                                } catch (e) {
+                                  _status = '❌ $e';
+                                }
+                                _busy = false;
+                                _activeLabel = '';
+                                setState(() {});
+                              },
                               onDelete: () async {
                                 final confirmed = await _confirmDeleteBackup(
                                   ctx,
@@ -923,6 +1068,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
   Widget _backupRow(
     Map<String, dynamic> backup, {
     required bool isLatest,
+    required VoidCallback onRestore,
     required VoidCallback onDelete,
   }) {
     final cs = Theme.of(context).colorScheme;
@@ -996,14 +1142,45 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
               ],
             ),
           ),
-          IconButton(
-            tooltip: '删除',
-            onPressed: onDelete,
-            icon: const Icon(Icons.delete_outline_rounded, color: _red),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: '恢复',
+                onPressed: onRestore,
+                icon: const Icon(Icons.restore_rounded, color: _blue),
+              ),
+              IconButton(
+                tooltip: '删除',
+                onPressed: onDelete,
+                icon: const Icon(Icons.delete_outline_rounded, color: _red),
+              ),
+            ],
           ),
         ],
       ),
     );
+  }
+
+  Future<bool> _confirmRestoreBackup(BuildContext context, String name) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('恢复备份'),
+        content: Text('恢复 $name 会覆盖当前本地存档，继续吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('恢复'),
+          ),
+        ],
+      ),
+    );
+    return result == true;
   }
 
   Future<bool> _confirmDeleteBackup(BuildContext context, String name) async {
