@@ -341,12 +341,17 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
       debugPrint('push: ZIP size = $size bytes, path = $zipPath');
       final uploadedBackup =
           await ref.read(syncServiceProvider).pushFullBackup(zipFile);
-      if (uploadedBackup != null && uploadedBackup.isNotEmpty) {
+      final latestAfterPush =
+          await ref.read(syncServiceProvider).checkLatestBackup();
+      final pushedIsLatest = uploadedBackup != null &&
+          uploadedBackup.isNotEmpty &&
+          latestAfterPush == uploadedBackup;
+      if (pushedIsLatest) {
         await ref.read(syncServiceProvider).markPulledBackup(uploadedBackup);
       } else {
         await ref.read(syncServiceProvider).forgetPulledBackup();
       }
-      _status = uploadedBackup != null ? '✅ 推送成功' : '❌ 推送失败';
+      _status = pushedIsLatest ? '✅ 推送成功' : '❌ 推送失败：服务器未确认最新备份';
       try { await zipFile.delete(); } catch (_) {}
     } catch (e) { _status = '❌ $e'; debugPrint('push error: $e'); }
     _busy = false; _activeLabel = ''; setState(() {});
@@ -360,12 +365,17 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
       await repo.exportBackup(zipPath);
       final uploadedBackup =
           await ref.read(syncServiceProvider).uploadBackup(File(zipPath));
-      if (uploadedBackup != null && uploadedBackup.isNotEmpty) {
+      final latestAfterUpload =
+          await ref.read(syncServiceProvider).checkLatestBackup();
+      final uploadedIsLatest = uploadedBackup != null &&
+          uploadedBackup.isNotEmpty &&
+          latestAfterUpload == uploadedBackup;
+      if (uploadedIsLatest) {
         await ref.read(syncServiceProvider).markPulledBackup(uploadedBackup);
       } else {
         await ref.read(syncServiceProvider).forgetPulledBackup();
       }
-      _status = uploadedBackup != null ? '✅ 完整备份上传成功' : '❌ 上传失败';
+      _status = uploadedIsLatest ? '✅ 完整备份上传成功' : '❌ 上传失败：服务器未确认最新备份';
       try { await File(zipPath).delete(); } catch (_) {}
     } catch (e) { _status = '❌ $e'; }
     _busy = false; _activeLabel = ''; setState(() {});
@@ -404,8 +414,12 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                           trailing: IconButton(
                             icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
                             onPressed: () async {
-                              final ok = await ref.read(syncServiceProvider).deleteBackup(name);
-                              if (ok) {
+                              final updatedList = await ref
+                                  .read(syncServiceProvider)
+                                  .deleteBackup(name);
+                              if (updatedList != null &&
+                                  !updatedList.any(
+                                      (b) => b['filename'] == name)) {
                                 if (ref
                                     .read(syncServiceProvider)
                                     .isSameLatestBackup(name)) {
@@ -413,7 +427,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                                       .read(syncServiceProvider)
                                       .forgetPulledBackup();
                                 }
-                                list = list.where((b) => b['filename'] != name).toList();
+                                list = updatedList;
                                 setDialogState(() {});
                                 _showMsg('已删除');
                               } else {

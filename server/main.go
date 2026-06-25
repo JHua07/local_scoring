@@ -266,7 +266,21 @@ func backupDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	path := filepath.Join(backupDir(), filename)
+	fileExisted := true
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		fileExisted = false
+	} else if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiResponse{"ok": false, "message": err.Error()})
+		return
+	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		writeJSON(w, http.StatusInternalServerError, apiResponse{"ok": false, "message": err.Error()})
+		return
+	}
+	stillExists := true
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		stillExists = false
+	} else if err != nil {
 		writeJSON(w, http.StatusInternalServerError, apiResponse{"ok": false, "message": err.Error()})
 		return
 	}
@@ -276,7 +290,35 @@ func backupDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, _ := result.RowsAffected()
-	writeJSON(w, http.StatusOK, apiResponse{"ok": true, "filename": filename, "deletedRows": rows})
+	if stillExists {
+		writeJSON(w, http.StatusInternalServerError, apiResponse{
+			"ok":          false,
+			"filename":    filename,
+			"message":     "backup file still exists after delete",
+			"fileExisted": fileExisted,
+			"deletedRows": rows,
+		})
+		return
+	}
+	backups, err := listBackups()
+	if err != nil {
+		writeJSON(w, http.StatusOK, apiResponse{
+			"ok":          true,
+			"filename":    filename,
+			"fileExisted": fileExisted,
+			"fileDeleted": true,
+			"deletedRows": rows,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, apiResponse{
+		"ok":          true,
+		"filename":    filename,
+		"fileExisted": fileExisted,
+		"fileDeleted": true,
+		"deletedRows": rows,
+		"backups":     backups,
+	})
 }
 
 func imageDownloadHandler(w http.ResponseWriter, r *http.Request) {

@@ -567,19 +567,32 @@ class SyncService {
   }
 
   /// 删除服务器上指定备份
-  Future<bool> deleteBackup(String filename) async {
+  Future<List<Map<String, dynamic>>?> deleteBackup(String filename) async {
     try {
-      final resp = await _get(
-        '/api/backup/delete?file=${Uri.encodeComponent(filename)}',
-      );
+      final resp = await http
+          .post(
+            Uri.parse('$_baseUrl/api/backup/delete'),
+            headers: _jsonHeaders,
+            body: jsonEncode({'filename': filename}),
+          )
+          .timeout(const Duration(seconds: 30));
       debugPrint(
         'deleteBackup $filename: HTTP ${resp.statusCode} ${resp.body}',
       );
-      return _responseAccepted(resp);
+      if (!_responseAccepted(resp)) return null;
+
+      try {
+        final decoded = jsonDecode(resp.body);
+        final list = _extractBackupList(decoded);
+        if (list != null) {
+          return list.map(_normalizeBackupEntry).toList();
+        }
+      } catch (_) {}
+      return await listBackups();
     } catch (e) {
       debugPrint('deleteBackup error: $e');
     }
-    return false;
+    return null;
   }
 
   /// 上传单张图片
