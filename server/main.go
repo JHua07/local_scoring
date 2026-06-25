@@ -25,6 +25,7 @@ import (
 const (
 	backupKeep     = 3
 	maxUploadBytes = 512 << 20 // 512 MB
+	serverVersion  = "sync-zip-v3-20260625"
 )
 
 var db *sql.DB
@@ -34,6 +35,7 @@ type backupInfo struct {
 	Filename  string `json:"filename"`
 	CreatedAt string `json:"createdAt"`
 	Size      int64  `json:"size"`
+	Sha256    string `json:"sha256,omitempty"`
 }
 
 type apiResponse map[string]any
@@ -84,7 +86,13 @@ func initDB(root string) error {
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, apiResponse{"ok": true, "status": "ok"})
+	writeJSON(w, http.StatusOK, apiResponse{
+		"ok":            true,
+		"status":        "ok",
+		"serverVersion": serverVersion,
+		"dataDir":       dataDir,
+		"backupDir":     backupDir(),
+	})
 }
 
 func registerHandler(w http.ResponseWriter, r *http.Request) {
@@ -136,6 +144,7 @@ func saveUploadedBackup(w http.ResponseWriter, r *http.Request, source string) {
 		writeJSON(w, http.StatusBadRequest, apiResponse{"ok": false, "message": "invalid zip: " + err.Error()})
 		return
 	}
+	sha := bytesSHA256(body)
 
 	now := time.Now()
 	createdAt := now.UTC().Format(time.RFC3339)
@@ -168,10 +177,15 @@ func saveUploadedBackup(w http.ResponseWriter, r *http.Request, source string) {
 
 	log.Printf("%s saved: %s (%d bytes)", source, filename, len(body))
 	writeJSON(w, http.StatusOK, apiResponse{
-		"ok":        true,
-		"filename":  filename,
-		"createdAt": createdAt,
-		"size":      len(body),
+		"ok":            true,
+		"filename":      filename,
+		"latestBackup":  filename,
+		"createdAt":     createdAt,
+		"size":          len(body),
+		"sha256":        sha,
+		"serverVersion": serverVersion,
+		"dataDir":       dataDir,
+		"backupDir":     backupDir(),
 	})
 }
 
@@ -227,16 +241,26 @@ func syncCheckHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if latest == nil {
-		writeJSON(w, http.StatusOK, apiResponse{"ok": true, "hasBackup": false})
+		writeJSON(w, http.StatusOK, apiResponse{
+			"ok":            true,
+			"hasBackup":     false,
+			"serverVersion": serverVersion,
+			"dataDir":       dataDir,
+			"backupDir":     backupDir(),
+		})
 		return
 	}
 	writeJSON(w, http.StatusOK, apiResponse{
-		"ok":           true,
-		"hasBackup":    true,
-		"latestBackup": latest.Filename,
-		"filename":     latest.Filename,
-		"createdAt":    latest.CreatedAt,
-		"size":         latest.Size,
+		"ok":            true,
+		"hasBackup":     true,
+		"latestBackup":  latest.Filename,
+		"filename":      latest.Filename,
+		"createdAt":     latest.CreatedAt,
+		"size":          latest.Size,
+		"sha256":        latest.Sha256,
+		"serverVersion": serverVersion,
+		"dataDir":       dataDir,
+		"backupDir":     backupDir(),
 	})
 }
 
@@ -250,7 +274,63 @@ func backupListHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, apiResponse{"ok": false, "message": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, apiResponse{"ok": true, "backups": backups})
+	writeJSON(w, http.StatusOK, apiResponse{
+		"ok":            true,
+		"backups":       backups,
+		"serverVersion": serverVersion,
+		"dataDir":       dataDir,
+		"backupDir":     backupDir(),
+	})
+}
+
+func syncDebugHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, apiResponse{"ok": false, "message": "method not allowed"})
+		return
+	}
+	backups, err := listBackups()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiResponse{"ok": false, "message": err.Error()})
+		return
+	}
+	files := make([]backupInfo, 0)
+	entries, err := os.ReadDir(backupDir())
+	if err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".zip") {
+				continue
+			}
+			filename, err := sanitizeBackupFilename(entry.Name())
+			if err != nil {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			sha, _ := fileSHA256(filepath.Join(backupDir(), filename))
+			files = append(files, backupInfo{
+				Filename:  filename,
+				CreatedAt: info.ModTime().UTC().Format(time.RFC3339),
+				Size:      info.Size(),
+				Sha256:    sha,
+			})
+		}
+	}
+	sort.SliceStable(files, func(i, j int) bool {
+		if files[i].CreatedAt == files[j].CreatedAt {
+			return files[i].Filename > files[j].Filename
+		}
+		return files[i].CreatedAt > files[j].CreatedAt
+	})
+	writeJSON(w, http.StatusOK, apiResponse{
+		"ok":            true,
+		"serverVersion": serverVersion,
+		"dataDir":       dataDir,
+		"backupDir":     backupDir(),
+		"backups":       backups,
+		"files":         files,
+	})
 }
 
 func backupDeleteHandler(w http.ResponseWriter, r *http.Request) {
@@ -312,12 +392,15 @@ func backupDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, apiResponse{
-		"ok":          true,
-		"filename":    filename,
-		"fileExisted": fileExisted,
-		"fileDeleted": true,
-		"deletedRows": rows,
-		"backups":     backups,
+		"ok":            true,
+		"filename":      filename,
+		"fileExisted":   fileExisted,
+		"fileDeleted":   true,
+		"deletedRows":   rows,
+		"backups":       backups,
+		"serverVersion": serverVersion,
+		"dataDir":       dataDir,
+		"backupDir":     backupDir(),
 	})
 }
 
@@ -556,6 +639,25 @@ func readZipFile(f *zip.File) ([]byte, error) {
 	return io.ReadAll(rc)
 }
 
+func bytesSHA256(body []byte) string {
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
+}
+
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
 func cleanupOldBackups(keep int) {
 	backups, err := listBackups()
 	if err != nil {
@@ -598,6 +700,7 @@ func listBackups() ([]backupInfo, error) {
 		}
 		item.Filename = filename
 		item.Size = info.Size()
+		item.Sha256, _ = fileSHA256(path)
 		seen[filename] = true
 		list = append(list, item)
 	}
@@ -630,10 +733,12 @@ func listBackups() ([]backupInfo, error) {
 			log.Printf("listBackups index %s: %v", filename, err)
 		}
 		seen[filename] = true
+		sha, _ := fileSHA256(filepath.Join(backupDir(), filename))
 		list = append(list, backupInfo{
 			Filename:  filename,
 			CreatedAt: createdAt,
 			Size:      info.Size(),
+			Sha256:    sha,
 		})
 	}
 
@@ -822,6 +927,7 @@ func main() {
 	mux.HandleFunc("/api/sync/push", syncPushHandler)
 	mux.HandleFunc("/api/sync/pull", syncPullHandler)
 	mux.HandleFunc("/api/sync/check", syncCheckHandler)
+	mux.HandleFunc("/api/sync/debug", syncDebugHandler)
 	mux.HandleFunc("/api/backup/upload", backupUploadHandler)
 	mux.HandleFunc("/api/backup/list", backupListHandler)
 	mux.HandleFunc("/api/backup/download", backupDownloadHandler)
