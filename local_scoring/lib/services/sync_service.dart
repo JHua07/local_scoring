@@ -203,9 +203,19 @@ class SyncService {
   // ==================== HTTP 封装 ====================
 
   Future<http.Response> _get(String path) async {
-    final uri = Uri.parse('$_baseUrl$path');
+    final original = Uri.parse('$_baseUrl$path');
+    final params = Map<String, String>.from(original.queryParameters);
+    params['_t'] = DateTime.now().millisecondsSinceEpoch.toString();
+    final uri = original.replace(queryParameters: params);
     return http
-        .get(uri, headers: _jsonHeaders)
+        .get(
+          uri,
+          headers: {
+            ..._jsonHeaders,
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+          },
+        )
         .timeout(const Duration(seconds: 30));
   }
 
@@ -337,9 +347,14 @@ class SyncService {
       final resp = await http
           .get(
             Uri.parse(
-              '$_baseUrl/api/backup/download?file=${Uri.encodeComponent(filename)}',
+              '$_baseUrl/api/backup/download?file=${Uri.encodeComponent(filename)}&_t=${DateTime.now().millisecondsSinceEpoch}',
             ),
-            headers: {..._authHeaders, 'Accept': 'application/zip'},
+            headers: {
+              ..._authHeaders,
+              'Accept': 'application/zip',
+              'Cache-Control': 'no-cache',
+              'Pragma': 'no-cache',
+            },
           )
           .timeout(const Duration(minutes: 5));
       final ok =
@@ -362,9 +377,14 @@ class SyncService {
       final resp = await http
           .get(
             Uri.parse(
-              '$_baseUrl/api/backup/download?file=${Uri.encodeComponent(filename)}',
+              '$_baseUrl/api/backup/download?file=${Uri.encodeComponent(filename)}&_t=${DateTime.now().millisecondsSinceEpoch}',
             ),
-            headers: {..._authHeaders, 'Accept': 'application/zip'},
+            headers: {
+              ..._authHeaders,
+              'Accept': 'application/zip',
+              'Cache-Control': 'no-cache',
+              'Pragma': 'no-cache',
+            },
           )
           .timeout(const Duration(minutes: 5));
       final remoteBytes = resp.bodyBytes;
@@ -394,9 +414,14 @@ class SyncService {
       final resp = await http
           .get(
             Uri.parse(
-              '$_baseUrl/api/backup/download?file=${Uri.encodeComponent(filename)}',
+              '$_baseUrl/api/backup/download?file=${Uri.encodeComponent(filename)}&_t=${DateTime.now().millisecondsSinceEpoch}',
             ),
-            headers: {..._authHeaders, 'Accept': 'application/zip'},
+            headers: {
+              ..._authHeaders,
+              'Accept': 'application/zip',
+              'Cache-Control': 'no-cache',
+              'Pragma': 'no-cache',
+            },
           )
           .timeout(const Duration(seconds: 30));
       final available =
@@ -455,7 +480,12 @@ class SyncService {
     final resp = await http
         .get(
           Uri.parse('$_baseUrl$path'),
-          headers: {..._authHeaders, 'Accept': 'application/zip'},
+          headers: {
+            ..._authHeaders,
+            'Accept': 'application/zip',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+          },
         )
         .timeout(const Duration(minutes: 5));
     debugPrint(
