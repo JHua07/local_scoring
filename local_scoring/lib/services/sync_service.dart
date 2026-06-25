@@ -238,6 +238,12 @@ class SyncService {
     await saveConfig();
   }
 
+  Future<void> forgetPulledBackup() async {
+    _lastPulledBackup = '';
+    _lastSyncTime = null;
+    await saveConfig();
+  }
+
   bool _isSuccessStatus(int statusCode) =>
       statusCode >= 200 && statusCode < 300;
 
@@ -378,6 +384,22 @@ class SyncService {
     return null;
   }
 
+  Map<String, dynamic>? _extractBackupEntry(dynamic decoded) {
+    final filename = _extractLatestBackup(decoded);
+    if (filename == null || filename.isEmpty) return null;
+    if (decoded is Map) {
+      final createdAt =
+          decoded['createdAt'] ?? decoded['updatedAt'] ?? decoded['modifiedAt'];
+      final size = decoded['size'];
+      return {
+        'filename': filename,
+        if (createdAt != null) 'createdAt': createdAt.toString(),
+        if (size != null) 'size': size,
+      };
+    }
+    return {'filename': filename, 'createdAt': filename};
+  }
+
   Map<String, dynamic> _normalizeBackupEntry(dynamic entry) {
     if (entry is String) {
       return {'filename': entry, 'createdAt': entry};
@@ -510,13 +532,27 @@ class SyncService {
         final list = _extractBackupList(decoded);
         if (list != null) {
           debugPrint('listBackups: got ${list.length} entries');
-          return list.map(_normalizeBackupEntry).toList();
+          final normalized = list.map(_normalizeBackupEntry).toList();
+          if (normalized.isNotEmpty) return normalized;
+
+          final fallback = _extractBackupEntry(decoded);
+          if (fallback != null) {
+            debugPrint('listBackups: fallback to latest backup from list body');
+            return [_normalizeBackupEntry(fallback)];
+          }
         }
         debugPrint('listBackups: unexpected type ${decoded.runtimeType}');
       }
       debugPrint('listBackups: HTTP ${resp.statusCode}');
     } catch (e) {
       debugPrint('listBackups error: $e');
+    }
+    final latest = await checkLatestBackup();
+    if (latest != null && latest.isNotEmpty) {
+      debugPrint('listBackups: fallback to /api/sync/check latest=$latest');
+      return [
+        {'filename': latest, 'createdAt': '最新备份'},
+      ];
     }
     return [];
   }

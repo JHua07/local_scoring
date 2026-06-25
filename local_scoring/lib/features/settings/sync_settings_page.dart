@@ -303,8 +303,10 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
     _busy = true; _activeLabel = '拉取'; _status = '正在下载备份...'; setState(() {});
     try {
       final svc = ref.read(syncServiceProvider);
+      final repo = ref.read(reviewRepositoryProvider) as LocalJsonReviewRepository;
+      final hasLocalReviews = (await repo.getAll()).isNotEmpty;
       final latestBackup = await svc.checkLatestBackup();
-      if (svc.isSameLatestBackup(latestBackup)) {
+      if (hasLocalReviews && svc.isSameLatestBackup(latestBackup)) {
         _status = '✅ 已是最新备份';
         _busy = false; _activeLabel = ''; setState(() {});
         return;
@@ -313,7 +315,6 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
       final zip = await svc.pullFullBackup(savePath);
       if (zip == null) { _status = '❌ 服务器暂无备份'; _busy = false; _activeLabel = ''; setState(() {}); return; }
 
-      final repo = ref.read(reviewRepositoryProvider) as LocalJsonReviewRepository;
       final count = await repo.importBackup(zip.path, replaceExisting: true);
       await ref.read(reviewListProvider.notifier).loadAll();
       await ref.read(templateListProvider.notifier).loadAll();

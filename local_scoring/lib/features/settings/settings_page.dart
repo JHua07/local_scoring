@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import '../../data/repositories/local_json_review_repository.dart';
 import '../../providers/review_provider.dart';
 import '../../providers/theme_provider.dart';
+import '../../services/sync_service.dart';
 import 'sync_settings_page.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
@@ -345,6 +346,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   .clearAll();
               if (mounted) {
                 if (success) {
+                  await ref.read(syncServiceProvider).forgetPulledBackup();
                   await _loadImageCount();
                   ScaffoldMessenger.of(
                     context,

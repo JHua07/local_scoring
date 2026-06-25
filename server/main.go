@@ -563,25 +563,36 @@ func listBackups() ([]backupInfo, error) {
 		return nil, err
 	}
 
-	if len(list) == 0 {
-		files, err := os.ReadDir(backupDir())
+	files, err := os.ReadDir(backupDir())
+	if err != nil {
+		return nil, err
+	}
+	for _, file := range files {
+		if file.IsDir() || !strings.HasSuffix(file.Name(), ".zip") {
+			continue
+		}
+		filename, err := sanitizeBackupFilename(file.Name())
+		if err != nil || seen[filename] {
+			continue
+		}
+		info, err := file.Info()
 		if err != nil {
-			return nil, err
+			continue
 		}
-		for _, file := range files {
-			if file.IsDir() || !strings.HasSuffix(file.Name(), ".zip") {
-				continue
-			}
-			info, err := file.Info()
-			if err != nil {
-				continue
-			}
-			list = append(list, backupInfo{
-				Filename:  file.Name(),
-				CreatedAt: info.ModTime().UTC().Format(time.RFC3339),
-				Size:      info.Size(),
-			})
+		createdAt := info.ModTime().UTC().Format(time.RFC3339)
+		if _, err := db.Exec(
+			"INSERT OR IGNORE INTO backups (filename, created_at) VALUES (?, ?)",
+			filename,
+			createdAt,
+		); err != nil {
+			log.Printf("listBackups index %s: %v", filename, err)
 		}
+		seen[filename] = true
+		list = append(list, backupInfo{
+			Filename:  filename,
+			CreatedAt: createdAt,
+			Size:      info.Size(),
+		})
 	}
 
 	sort.SliceStable(list, func(i, j int) bool {
