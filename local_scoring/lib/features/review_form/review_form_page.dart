@@ -549,7 +549,7 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
                 }),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String?>(
-                  value: parentId,
+                  initialValue: parentId,
                   items: [
                     const DropdownMenuItem(
                         value: null, child: Text('顶级分类（不归属任何模板）')),

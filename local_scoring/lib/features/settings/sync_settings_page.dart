@@ -61,7 +61,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
               TweenAnimationBuilder<double>(
                 tween: Tween(begin: 0.0, end: 1.0),
                 duration: const Duration(milliseconds: 500),
-                builder: (_, v, __) => Opacity(
+                builder: (_, v, _) => Opacity(
                   opacity: v,
                   child: Transform.translate(
                     offset: Offset(0, (1 - v) * 20),
@@ -150,7 +150,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
               TweenAnimationBuilder<double>(
                 tween: Tween(begin: 0.0, end: 1.0),
                 duration: const Duration(milliseconds: 600),
-                builder: (_, v, __) => Opacity(
+                builder: (_, v, _) => Opacity(
                   opacity: v,
                   child: Container(
                     padding: const EdgeInsets.all(4),
@@ -175,7 +175,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                   child: TweenAnimationBuilder<double>(
                     tween: Tween(begin: 0.0, end: 1.0),
                     duration: const Duration(milliseconds: 400),
-                    builder: (_, v, __) => Opacity(
+                    builder: (_, v, _) => Opacity(
                       opacity: v,
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -303,14 +303,21 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
     _busy = true; _activeLabel = '拉取'; _status = '正在下载备份...'; setState(() {});
     try {
       final svc = ref.read(syncServiceProvider);
+      final latestBackup = await svc.checkLatestBackup();
+      if (svc.isSameLatestBackup(latestBackup)) {
+        _status = '✅ 已是最新备份';
+        _busy = false; _activeLabel = ''; setState(() {});
+        return;
+      }
       final savePath = p.join(Directory.systemTemp.path, 'pull_${DateTime.now().millisecondsSinceEpoch}.zip');
       final zip = await svc.pullFullBackup(savePath);
       if (zip == null) { _status = '❌ 服务器暂无备份'; _busy = false; _activeLabel = ''; setState(() {}); return; }
 
       final repo = ref.read(reviewRepositoryProvider) as LocalJsonReviewRepository;
-      await repo.clearAll();
-      final count = await repo.importBackup(zip.path);
+      final count = await repo.importBackup(zip.path, replaceExisting: true);
       await ref.read(reviewListProvider.notifier).loadAll();
+      await ref.read(templateListProvider.notifier).loadAll();
+      await svc.markPulledBackup(latestBackup);
       _status = '✅ 恢复完成，导入 $count 条';
       try { await zip.delete(); } catch (_) {}
     } catch (e) { _status = '❌ $e'; }
@@ -323,10 +330,18 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
       final repo = ref.read(reviewRepositoryProvider) as LocalJsonReviewRepository;
       final zipPath = p.join(Directory.systemTemp.path, 'push_${DateTime.now().millisecondsSinceEpoch}.zip');
       await repo.exportBackup(zipPath);
-      final ok = await ref.read(syncServiceProvider).pushFullBackup(File(zipPath));
+      final zipFile = File(zipPath);
+      if (!await zipFile.exists()) {
+        _status = '❌ 打包失败：文件未生成';
+        _busy = false; _activeLabel = ''; setState(() {});
+        return;
+      }
+      final size = await zipFile.length();
+      debugPrint('push: ZIP size = $size bytes, path = $zipPath');
+      final ok = await ref.read(syncServiceProvider).pushFullBackup(zipFile);
       _status = ok ? '✅ 推送成功' : '❌ 推送失败';
-      try { await File(zipPath).delete(); } catch (_) {}
-    } catch (e) { _status = '❌ $e'; }
+      try { await zipFile.delete(); } catch (_) {}
+    } catch (e) { _status = '❌ $e'; debugPrint('push error: $e'); }
     _busy = false; _activeLabel = ''; setState(() {});
   }
 

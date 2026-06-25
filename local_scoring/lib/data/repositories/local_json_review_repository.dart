@@ -290,6 +290,79 @@ class LocalJsonReviewRepository implements ReviewRepository {
 
   // ========== 清空 & 导出 ==========
 
+  ReviewItem _rewriteImagePaths(
+    ReviewItem item,
+    String Function(String imagePath) rewrite,
+  ) {
+    return item.copyWith(
+      evaluations: item.evaluations
+          .map((e) => e.copyWith(
+                imagePaths: e.imagePaths.map(rewrite).toList(),
+              ))
+          .toList(),
+    );
+  }
+
+  String _backupImagePath(String category, String imagePath) {
+    return p.posix.join(category, _imagesDir, p.basename(imagePath));
+  }
+
+  String _normalizedArchivePath(String path) =>
+      path.replaceAll('\\', '/').replaceFirst(RegExp(r'^/+'), '');
+
+  String _archiveImagePathFor(String category, String imagePath) {
+    final normalized = _normalizedArchivePath(imagePath);
+    if (normalized.startsWith('$category/$_imagesDir/')) return normalized;
+    if (normalized.startsWith('$_imagesDir/')) {
+      return p.posix.join(category, normalized);
+    }
+    return _backupImagePath(category, imagePath);
+  }
+
+  Future<void> _writeImportedImage(
+    ArchiveFile imgFile,
+    Directory imgDir,
+    Map<String, String> pathMap,
+  ) async {
+    if (!imgFile.isFile) return;
+    final archivePath = _normalizedArchivePath(imgFile.name);
+    final imageName = p.basename(archivePath);
+    if (imageName.isEmpty) return;
+
+    var destPath = p.join(imgDir.path, imageName);
+    if (await File(destPath).exists()) {
+      final baseName = p.basenameWithoutExtension(imageName);
+      final extension = p.extension(imageName);
+      var suffix = 1;
+      do {
+        destPath = p.join(imgDir.path, '${baseName}_import_$suffix$extension');
+        suffix++;
+      } while (await File(destPath).exists());
+    }
+    await File(destPath).writeAsBytes(imgFile.content as List<int>);
+    pathMap[archivePath] = destPath;
+    pathMap[p.basename(archivePath)] = destPath;
+
+    final parts = p.posix.split(archivePath);
+    final imagesIndex = parts.indexOf(_imagesDir);
+    if (imagesIndex >= 0 && imagesIndex + 1 < parts.length) {
+      pathMap[p.posix.joinAll(parts.sublist(imagesIndex))] = destPath;
+    }
+  }
+
+  String _restoreImagePath(
+    String category,
+    String originalPath,
+    Map<String, String> pathMap,
+  ) {
+    final normalized = _normalizedArchivePath(originalPath);
+    return pathMap[normalized] ??
+        pathMap[p.posix.join(category, normalized)] ??
+        pathMap[_archiveImagePathFor(category, originalPath)] ??
+        pathMap[p.basename(originalPath)] ??
+        originalPath;
+  }
+
   @override
   Future<void> clearAll() async {
     // 清空 JSON（含已删除评分）
@@ -351,7 +424,13 @@ class LocalJsonReviewRepository implements ReviewRepository {
     for (final cat in catNames) {
       final catReviews =
           allReviews.where((r) => r.category == cat).toList();
-      final jsonStr = ReviewItem.listToJson(catReviews);
+      final exportReviews = catReviews
+          .map((r) => _rewriteImagePaths(
+                r,
+                (imagePath) => _backupImagePath(cat, imagePath),
+              ))
+          .toList();
+      final jsonStr = ReviewItem.listToJson(exportReviews);
       final jsonBytes = utf8.encode(jsonStr);
       archive.addFile(
           ArchiveFile('$cat/data.json', jsonBytes.length, jsonBytes));
@@ -381,61 +460,71 @@ class LocalJsonReviewRepository implements ReviewRepository {
     return outputPath;
   }
 
-  /// 从备份 zip 恢复数据，merge 模式：不清空现有数据，追加导入
+  /// 从备份 zip 恢复数据，默认合并，可按需覆盖现有数据。
   @override
-  Future<int> importBackup(String zipPath) async {
+  Future<int> importBackup(
+    String zipPath, {
+    bool replaceExisting = false,
+  }) async {
     final zipBytes = await File(zipPath).readAsBytes();
     final archive = ZipDecoder().decodeBytes(zipBytes);
 
     var importedCount = 0;
+    final pathMap = <String, String>{};
 
-    // 1) 模板
+    if (replaceExisting) {
+      await clearAll();
+    }
+
+    final imgDir = await _imagesDirRef;
+    for (final imgFile in archive.files) {
+      final normalizedName = _normalizedArchivePath(imgFile.name);
+      final parts = p.posix.split(normalizedName);
+      if (parts.length >= 3 && parts[parts.length - 2] == _imagesDir) {
+        await _writeImportedImage(imgFile, imgDir, pathMap);
+      }
+    }
+
     final tEntry = archive.files.firstWhere(
         (f) => f.name == 'templates.json',
         orElse: () => ArchiveFile('', 0, []));
     if (tEntry.name.isNotEmpty) {
       final content = utf8.decode(tEntry.content as List<int>);
       final templates = ScoringTemplate.listFromJson(content);
-      final existing = await getAllTemplates();
-      final existingIds = existing.map((t) => t.id).toSet();
-      for (final t in templates) {
-        if (!existingIds.contains(t.id)) {
-          await addTemplate(t);
+      if (replaceExisting) {
+        await saveAllTemplates(templates);
+      } else {
+        final existing = await getAllTemplates();
+        final byId = {for (final t in existing) t.id: t};
+        for (final t in templates) {
+          byId[t.id] = t;
         }
+        await saveAllTemplates(byId.values.toList());
       }
     }
 
-    // 2) 遍历分类文件夹
+    final existing = await _getAllRaw();
+    final byId = {for (final r in existing) r.id: r};
     for (final file in archive.files) {
       if (file.name.endsWith('/data.json')) {
         final cat = file.name.split('/').first;
         final content = utf8.decode(file.content as List<int>);
         final reviews = ReviewItem.listFromJson(content);
-        final existing = await _getAllRaw();
-        final existingIds = existing.map((r) => r.id).toSet();
 
         for (final r in reviews) {
-          if (!existingIds.contains(r.id)) {
-            await add(r);
+          final restored = _rewriteImagePaths(
+            r,
+            (imagePath) => _restoreImagePath(cat, imagePath, pathMap),
+          );
+          if (replaceExisting || !byId.containsKey(restored.id)) {
             importedCount++;
-          }
-        }
-
-        // 恢复该分类图片
-        final imgPrefix = '$cat/images/';
-        for (final imgFile in archive.files) {
-          if (!imgFile.isFile || !imgFile.name.startsWith(imgPrefix)) continue;
-          final imgName = p.basename(imgFile.name);
-          final imgDir = await _imagesDirRef;
-          final destPath = p.join(imgDir.path, imgName);
-          if (!await File(destPath).exists()) {
-            await File(destPath)
-                .writeAsBytes(imgFile.content as List<int>);
+            byId[restored.id] = restored;
           }
         }
       }
     }
 
+    await saveAll(byId.values.toList());
     return importedCount;
   }
 }

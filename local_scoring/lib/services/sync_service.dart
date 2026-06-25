@@ -25,7 +25,7 @@ class SyncService {
   String _baseUrl = '';
   String _token = '';
   String _deviceId = '';
-  Completer<void>? _initCompleter;
+  String _lastPulledBackup = '';
 
   // 自动备份
   bool _autoBackup = false;
@@ -67,6 +67,7 @@ class SyncService {
         _dataSource = DataSource.values.firstWhere(
             (e) => e.name == (m['dataSource'] as String?),
             orElse: () => DataSource.local);
+        _lastPulledBackup = (m['lastPulledBackup'] as String?) ?? '';
         final lastStr = m['lastBackupTime'] as String?;
         if (lastStr != null) _lastBackupTime = DateTime.tryParse(lastStr);
         final syncStr = m['lastSyncTime'] as String?;
@@ -91,6 +92,7 @@ class SyncService {
         'autoBackup': _autoBackup,
         'backupInterval': _backupInterval.name,
         'dataSource': _dataSource.name,
+        'lastPulledBackup': _lastPulledBackup,
         'lastBackupTime': _lastBackupTime?.toIso8601String(),
         'lastSyncTime': _lastSyncTime?.toIso8601String(),
       }));
@@ -110,8 +112,14 @@ class SyncService {
   String get token => _token;
   String get deviceId => _deviceId;
 
-  void configure({required String baseUrl, required String token, required String deviceId}) {
-    _baseUrl = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+  void configure({
+    required String baseUrl,
+    required String token,
+    required String deviceId,
+  }) {
+    _baseUrl = baseUrl.endsWith('/')
+        ? baseUrl.substring(0, baseUrl.length - 1)
+        : baseUrl;
     _token = token;
     _deviceId = deviceId;
   }
@@ -120,6 +128,7 @@ class SyncService {
     _baseUrl = '';
     _token = '';
     _deviceId = '';
+    _lastPulledBackup = '';
     _autoBackup = false;
     _dataSource = DataSource.local;
     _cancelAutoBackup();
@@ -192,21 +201,203 @@ class SyncService {
 
   // ==================== HTTP 封装 ====================
 
-  Future<http.Response> _post(String path, Map<String, dynamic> body) async {
-    final uri = Uri.parse('$_baseUrl$path');
-    final bytes = utf8.encode(jsonEncode(body));
-    return http.post(uri, headers: _headers, body: bytes).timeout(const Duration(seconds: 30));
-  }
-
   Future<http.Response> _get(String path) async {
     final uri = Uri.parse('$_baseUrl$path');
-    return http.get(uri, headers: _headers).timeout(const Duration(seconds: 30));
+    return http
+        .get(uri, headers: _jsonHeaders)
+        .timeout(const Duration(seconds: 30));
   }
 
-  Map<String, String> get _headers => {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $_token',
+  Map<String, String> get _authHeaders => {
+        if (_token.isNotEmpty) 'Authorization': 'Bearer $_token',
+        if (_deviceId.isNotEmpty) 'X-Device-Id': _deviceId,
       };
+
+  Map<String, String> get _jsonHeaders => {
+        ..._authHeaders,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      };
+
+  Map<String, String> get _zipHeaders => {
+        ..._authHeaders,
+        'Content-Type': 'application/zip',
+        'Accept': 'application/json',
+      };
+
+  bool isSameLatestBackup(String? latestBackup) {
+    return latestBackup != null &&
+        latestBackup.isNotEmpty &&
+        latestBackup == _lastPulledBackup;
+  }
+
+  Future<void> markPulledBackup(String? latestBackup) async {
+    if (latestBackup == null || latestBackup.isEmpty) return;
+    _lastPulledBackup = latestBackup;
+    _lastSyncTime = DateTime.now();
+    await saveConfig();
+  }
+
+  bool _isSuccessStatus(int statusCode) =>
+      statusCode >= 200 && statusCode < 300;
+
+  bool _looksLikeZip(List<int> bytes) {
+    return bytes.length >= 4 &&
+        bytes[0] == 0x50 &&
+        bytes[1] == 0x4b &&
+        (bytes[2] == 0x03 || bytes[2] == 0x05 || bytes[2] == 0x07);
+  }
+
+  String _shortResponseBody(http.Response resp) {
+    final contentType = resp.headers['content-type'] ?? '';
+    if (!contentType.contains('json') && !contentType.startsWith('text/')) {
+      return '<${resp.bodyBytes.length} bytes>';
+    }
+    final body = resp.body.trim().replaceAll('\n', ' ');
+    if (body.length <= 500) return body;
+    return '${body.substring(0, 500)}...';
+  }
+
+  bool _responseAccepted(http.Response resp) {
+    if (!_isSuccessStatus(resp.statusCode)) return false;
+    final body = resp.body.trim();
+    if (body.isEmpty) return true;
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map) {
+        final success = decoded['success'] ?? decoded['ok'];
+        if (success is bool) return success;
+        if (success is num) return success != 0;
+        if (success is String) {
+          final normalized = success.toLowerCase().trim();
+          if (normalized == 'true' ||
+              normalized == '1' ||
+              normalized == 'ok' ||
+              normalized == 'success') {
+            return true;
+          }
+          if (normalized == 'false' ||
+              normalized == '0' ||
+              normalized == 'error' ||
+              normalized == 'failed') {
+            return false;
+          }
+        }
+        if (decoded['error'] != null) return false;
+        final message = decoded['message']?.toString().toLowerCase();
+        if (message != null &&
+            (message.contains('invalid body') ||
+                message.contains('not found') ||
+                message.contains('failed'))) {
+          return false;
+        }
+      }
+    } catch (_) {
+      // Non-JSON 2xx responses are accepted.
+    }
+    return true;
+  }
+
+  Future<bool> _uploadZip(String path, File zipFile) async {
+    final uri = Uri.parse('$_baseUrl$path');
+    final bytes = await zipFile.readAsBytes();
+    final resp = await http
+        .post(
+          uri,
+          headers: {
+            ..._zipHeaders,
+            'X-Filename': p.basename(zipFile.path),
+          },
+          body: bytes,
+        )
+        .timeout(const Duration(minutes: 5));
+    debugPrint(
+      'uploadZip $path: HTTP ${resp.statusCode}, '
+      'response=${_shortResponseBody(resp)}',
+    );
+    return _responseAccepted(resp);
+  }
+
+  Future<File?> _downloadZipToPath(
+    String path,
+    String savePath, {
+    required String label,
+  }) async {
+    final resp = await http.get(
+      Uri.parse('$_baseUrl$path'),
+      headers: {
+        ..._authHeaders,
+        'Accept': 'application/zip',
+      },
+    ).timeout(const Duration(minutes: 5));
+    debugPrint(
+      '$label: HTTP ${resp.statusCode}, response=${_shortResponseBody(resp)}',
+    );
+    if (_isSuccessStatus(resp.statusCode) && _looksLikeZip(resp.bodyBytes)) {
+      final f = File(savePath);
+      await f.writeAsBytes(resp.bodyBytes);
+      return f;
+    }
+    return null;
+  }
+
+  String? _extractLatestBackup(dynamic decoded) {
+    if (decoded is Map) {
+      final direct = decoded['latestBackup'] ??
+          decoded['latest'] ??
+          decoded['filename'] ??
+          decoded['name'];
+      if (direct != null && direct.toString().isNotEmpty) {
+        return direct.toString();
+      }
+      final backup = decoded['backup'];
+      if (backup != null) return _extractLatestBackup(backup);
+      final backups = decoded['backups'] ?? decoded['items'] ?? decoded['data'];
+      if (backups is List && backups.isNotEmpty) {
+        return _extractLatestBackup(backups.first);
+      }
+      return null;
+    }
+    if (decoded is List && decoded.isNotEmpty) {
+      return _extractLatestBackup(decoded.first);
+    }
+    if (decoded is String && decoded.isNotEmpty) return decoded;
+    return null;
+  }
+
+  List<dynamic>? _extractBackupList(dynamic decoded) {
+    if (decoded is List) return decoded;
+    if (decoded is Map) {
+      for (final key in ['backups', 'items', 'data', 'snapshots', 'files']) {
+        final value = decoded[key];
+        if (value is List) return value;
+      }
+      final result = decoded['result'];
+      if (result != null) return _extractBackupList(result);
+    }
+    return null;
+  }
+
+  Map<String, dynamic> _normalizeBackupEntry(dynamic entry) {
+    if (entry is String) {
+      return {'filename': entry, 'createdAt': entry};
+    }
+    if (entry is Map) {
+      final m = <String, dynamic>{};
+      entry.forEach((key, value) => m[key.toString()] = value);
+      final filename =
+          m['filename'] ?? m['name'] ?? m['file'] ?? m['key'] ?? m['id'];
+      final createdAt = m['createdAt'] ??
+          m['updatedAt'] ??
+          m['modifiedAt'] ??
+          m['lastModified'] ??
+          m['mtime'];
+      if (filename != null) m['filename'] = filename.toString();
+      if (createdAt != null) m['createdAt'] = createdAt.toString();
+      return m;
+    }
+    return {'filename': entry.toString(), 'createdAt': ''};
+  }
 
   // ==================== API ====================
 
@@ -235,32 +426,30 @@ class SyncService {
     return null;
   }
 
-  /// 推送：打包本地完整数据为 ZIP → 上传到服务器
+  /// 推送：打包本地完整数据为 ZIP，上传到服务器
   Future<bool> pushFullBackup(File zipFile) async {
     try {
-      final uri = Uri.parse('$_baseUrl/api/sync/push');
-      final bytes = await zipFile.readAsBytes();
-      final resp = await http.post(uri, headers: _headers, body: bytes)
-          .timeout(const Duration(minutes: 5));
-      return resp.statusCode == 200;
+      final syncOk = await _uploadZip('/api/sync/push', zipFile);
+      if (syncOk) return true;
+      debugPrint('pushFullBackup: fallback to /api/backup/upload');
+      return await uploadBackup(zipFile);
     } catch (e) {
       debugPrint('pushFullBackup: $e');
       return false;
     }
   }
 
-  /// 拉取：下载最新备份 ZIP → 保存到指定路径
   Future<File?> pullFullBackup(String savePath) async {
     try {
-      final resp = await http.get(
-        Uri.parse('$_baseUrl/api/sync/pull'),
-        headers: _headers,
-      ).timeout(const Duration(minutes: 5));
-      if (resp.statusCode == 200) {
-        final f = File(savePath);
-        await f.writeAsBytes(resp.bodyBytes);
-        return f;
-      }
+      final syncZip = await _downloadZipToPath(
+        '/api/sync/pull',
+        savePath,
+        label: 'pullFullBackup /api/sync/pull',
+      );
+      if (syncZip != null) return syncZip;
+
+      debugPrint('pullFullBackup: fallback to /api/backup/download');
+      return await downloadBackupToPath(savePath);
     } catch (e) {
       debugPrint('pullFullBackup: $e');
     }
@@ -272,8 +461,7 @@ class SyncService {
     try {
       final resp = await _get('/api/sync/check');
       if (resp.statusCode == 200) {
-        final m = jsonDecode(resp.body);
-        return m['latestBackup'] as String?;
+        return _extractLatestBackup(jsonDecode(resp.body));
       }
     } catch (_) {}
     return null;
@@ -282,26 +470,32 @@ class SyncService {
   /// 上传备份 zip（手动备份用）
   Future<bool> uploadBackup(File zipFile) async {
     try {
-      final uri = Uri.parse('$_baseUrl/api/backup/upload');
-      final bytes = await zipFile.readAsBytes();
-      final resp = await http.post(uri, headers: _headers, body: bytes).timeout(const Duration(minutes: 5));
-      return resp.statusCode == 200;
-    } catch (_) {}
+      return await _uploadZip('/api/backup/upload', zipFile);
+    } catch (e) {
+      debugPrint('uploadBackup: $e');
+    }
     return false;
   }
 
   /// 下载服务器备份 zip（指定文件名，空则最新）
   Future<File?> downloadBackup(String saveDir, {String? filename}) async {
+    final name =
+        filename ?? 'server_backup_${DateTime.now().millisecondsSinceEpoch}.zip';
+    return downloadBackupToPath(p.join(saveDir, name), filename: filename);
+  }
+
+  Future<File?> downloadBackupToPath(String savePath, {String? filename}) async {
     try {
-      final qs = filename != null ? '?file=${Uri.encodeComponent(filename)}' : '';
-      final resp = await _get('/api/backup/download$qs');
-      if (resp.statusCode == 200) {
-        final name = filename ?? 'server_backup_${DateTime.now().millisecondsSinceEpoch}.zip';
-        final f = File(p.join(saveDir, name));
-        await f.writeAsBytes(resp.bodyBytes);
-        return f;
-      }
-    } catch (_) {}
+      final qs =
+          filename != null ? '?file=${Uri.encodeComponent(filename)}' : '';
+      return await _downloadZipToPath(
+        '/api/backup/download$qs',
+        savePath,
+        label: 'downloadBackup',
+      );
+    } catch (e) {
+      debugPrint('downloadBackup error: $e');
+    }
     return null;
   }
 
@@ -313,9 +507,10 @@ class SyncService {
         final body = resp.body;
         debugPrint('listBackups body: ${body.length} chars');
         final decoded = jsonDecode(body);
-        if (decoded is List) {
-          debugPrint('listBackups: got ${decoded.length} entries');
-          return decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        final list = _extractBackupList(decoded);
+        if (list != null) {
+          debugPrint('listBackups: got ${list.length} entries');
+          return list.map(_normalizeBackupEntry).toList();
         }
         debugPrint('listBackups: unexpected type ${decoded.runtimeType}');
       }
@@ -329,9 +524,13 @@ class SyncService {
   /// 删除服务器上指定备份
   Future<bool> deleteBackup(String filename) async {
     try {
-      final resp = await _get('/api/backup/delete?file=${Uri.encodeComponent(filename)}');
-      debugPrint('deleteBackup $filename: HTTP ${resp.statusCode} ${resp.body}');
-      return resp.statusCode == 200;
+      final resp = await _get(
+        '/api/backup/delete?file=${Uri.encodeComponent(filename)}',
+      );
+      debugPrint(
+        'deleteBackup $filename: HTTP ${resp.statusCode} ${resp.body}',
+      );
+      return _responseAccepted(resp);
     } catch (e) {
       debugPrint('deleteBackup error: $e');
     }
@@ -347,7 +546,7 @@ class SyncService {
         'reviewId': reviewId,
         'data': data,
       }));
-      final resp = await http.post(uri, headers: _headers, body: body);
+      final resp = await http.post(uri, headers: _jsonHeaders, body: body);
       return resp.statusCode == 200;
     } catch (_) {}
     return false;

@@ -33,5 +33,5 @@ abstract class ReviewRepository {
   Future<String> exportJson();
   Future<List<Map<String, dynamic>>> exportReviewsJson();
   Future<String> exportBackup(String outputPath);
-  Future<int> importBackup(String zipPath);
+  Future<int> importBackup(String zipPath, {bool replaceExisting = false});
 }
