@@ -346,14 +346,7 @@ func backupDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	path := filepath.Join(backupDir(), filename)
-	fileExisted := true
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		fileExisted = false
-	} else if err != nil {
-		writeJSON(w, http.StatusInternalServerError, apiResponse{"ok": false, "message": err.Error()})
-		return
-	}
-	if !fileExisted {
+	if err := os.Remove(path); errors.Is(err, os.ErrNotExist) {
 		if _, err := db.Exec("DELETE FROM backups WHERE filename = ?", filename); err != nil {
 			writeJSON(w, http.StatusInternalServerError, apiResponse{"ok": false, "message": err.Error()})
 			return
@@ -371,40 +364,23 @@ func backupDeleteHandler(w http.ResponseWriter, r *http.Request) {
 			"backupDir":     backupDir(),
 		})
 		return
-	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		writeJSON(w, http.StatusInternalServerError, apiResponse{"ok": false, "message": err.Error()})
-		return
-	}
-	stillExists := true
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		stillExists = false
 	} else if err != nil {
 		writeJSON(w, http.StatusInternalServerError, apiResponse{"ok": false, "message": err.Error()})
 		return
 	}
+
 	result, err := db.Exec("DELETE FROM backups WHERE filename = ?", filename)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, apiResponse{"ok": false, "message": err.Error()})
 		return
 	}
 	rows, _ := result.RowsAffected()
-	if stillExists {
-		writeJSON(w, http.StatusInternalServerError, apiResponse{
-			"ok":          false,
-			"filename":    filename,
-			"message":     "backup file still exists after delete",
-			"fileExisted": fileExisted,
-			"deletedRows": rows,
-		})
-		return
-	}
 	backups, err := listBackups()
 	if err != nil {
 		writeJSON(w, http.StatusOK, apiResponse{
 			"ok":          true,
 			"filename":    filename,
-			"fileExisted": fileExisted,
+			"fileExisted": true,
 			"fileDeleted": true,
 			"deletedRows": rows,
 		})
@@ -413,7 +389,7 @@ func backupDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, apiResponse{
 		"ok":            true,
 		"filename":      filename,
-		"fileExisted":   fileExisted,
+		"fileExisted":   true,
 		"fileDeleted":   true,
 		"deletedRows":   rows,
 		"backups":       backups,
@@ -695,48 +671,17 @@ func cleanupOldBackups(keep int) {
 }
 
 func listBackups() ([]backupInfo, error) {
-	rows, err := db.Query("SELECT filename, created_at FROM backups ORDER BY created_at DESC, id DESC")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	seen := map[string]bool{}
-	list := make([]backupInfo, 0)
-	for rows.Next() {
-		var item backupInfo
-		if err := rows.Scan(&item.Filename, &item.CreatedAt); err != nil {
-			return nil, err
-		}
-		filename, err := sanitizeBackupFilename(item.Filename)
-		if err != nil || seen[filename] {
-			continue
-		}
-		path := filepath.Join(backupDir(), filename)
-		info, err := os.Stat(path)
-		if err != nil || info.IsDir() {
-			continue
-		}
-		item.Filename = filename
-		item.Size = info.Size()
-		item.Sha256, _ = fileSHA256(path)
-		seen[filename] = true
-		list = append(list, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
 	files, err := os.ReadDir(backupDir())
 	if err != nil {
 		return nil, err
 	}
+	list := make([]backupInfo, 0)
 	for _, file := range files {
-		if file.IsDir() || !strings.HasSuffix(file.Name(), ".zip") {
+		if file.IsDir() || !strings.HasSuffix(strings.ToLower(file.Name()), ".zip") {
 			continue
 		}
 		filename, err := sanitizeBackupFilename(file.Name())
-		if err != nil || seen[filename] {
+		if err != nil {
 			continue
 		}
 		info, err := file.Info()
@@ -751,7 +696,6 @@ func listBackups() ([]backupInfo, error) {
 		); err != nil {
 			log.Printf("listBackups index %s: %v", filename, err)
 		}
-		seen[filename] = true
 		sha, _ := fileSHA256(filepath.Join(backupDir(), filename))
 		list = append(list, backupInfo{
 			Filename:  filename,

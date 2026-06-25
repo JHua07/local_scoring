@@ -693,11 +693,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                               final updatedList = await ref
                                   .read(syncServiceProvider)
                                   .deleteBackup(name);
-                              final stillAvailable = await ref
-                                  .read(syncServiceProvider)
-                                  .backupStillAvailable(name);
                               if (updatedList != null &&
-                                  !stillAvailable &&
                                   !updatedList.any(
                                     (b) => b['filename'] == name,
                                   )) {
@@ -712,9 +708,6 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                                 setDialogState(() {});
                                 _showMsg('已删除');
                               } else {
-                                await ref
-                                    .read(syncServiceProvider)
-                                    .logSyncDebug('delete still available');
                                 list = await ref
                                     .read(syncServiceProvider)
                                     .listBackups();
