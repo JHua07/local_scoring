@@ -5,8 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../data/models/evaluation.dart';
+import '../../data/models/filter_state.dart';
 import '../../data/models/review_item.dart';
 import '../../providers/review_provider.dart';
+import 'widgets/filter_bottom_sheet.dart';
 import '../../shared/widgets/empty_state.dart';
 import '../../shared/widgets/review_card.dart';
 import '../../shared/widgets/swipe_wrapper.dart';
@@ -27,6 +29,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
   SortMode _sortMode = SortMode.time;
   bool _isTimelineMode = false;
   String? _expandedId;
+  FilterState _filterState = FilterState.empty;
   final _evalTextController = TextEditingController(); // 新增评价输入
   final _searchController = TextEditingController();
 
@@ -60,6 +63,14 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
           items.where((r) => r.category == _selectedTemplateId).toList();
     }
 
+    // 高级筛选
+    final allTemplates = templateState.templates;
+    if (_filterState.isActive) {
+      items = items
+          .where((r) => _filterState.matches(r, allTemplates))
+          .toList();
+    }
+
     // 排序（时间线模式始终按时间降序）
     if (!_isTimelineMode) {
       switch (_sortMode) {
@@ -77,7 +88,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
       items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     }
 
-    final templates = templateState.topLevel;
+    final topLevelTemplates = templateState.topLevel;
 
     return Scaffold(
       appBar: AppBar(
@@ -128,34 +139,46 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                     // 搜索栏
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                      child: TextField(
-                        controller: _searchController,
-                        decoration: InputDecoration(
-                          hintText: '搜索名称、评价、标签...',
-                          prefixIcon:
-                              const Icon(Icons.search, size: 20),
-                          suffixIcon: _searchQuery.isNotEmpty
-                              ? IconButton(
-                                  icon: const Icon(Icons.clear,
-                                      size: 18),
-                                  onPressed: () {
-                                    _searchController.clear();
-                                    setState(() => _searchQuery = '');
-                                  },
-                                )
-                              : null,
-                          filled: true,
-                          fillColor: colorScheme.surfaceContainerHighest
-                              .withValues(alpha: 0.4),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: BorderSide.none,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _searchController,
+                              decoration: InputDecoration(
+                                hintText: '搜索名称、评价、标签...',
+                                prefixIcon:
+                                    const Icon(Icons.search, size: 20),
+                                suffixIcon: _searchQuery.isNotEmpty
+                                    ? IconButton(
+                                        icon: const Icon(Icons.clear,
+                                            size: 18),
+                                        onPressed: () {
+                                          _searchController.clear();
+                                          setState(() =>
+                                              _searchQuery = '');
+                                        },
+                                      )
+                                    : null,
+                                filled: true,
+                                fillColor: colorScheme
+                                    .surfaceContainerHighest
+                                    .withValues(alpha: 0.4),
+                                border: OutlineInputBorder(
+                                  borderRadius:
+                                      BorderRadius.circular(14),
+                                  borderSide: BorderSide.none,
+                                ),
+                                contentPadding:
+                                    const EdgeInsets.symmetric(
+                                        horizontal: 16, vertical: 10),
+                              ),
+                              onChanged: (v) =>
+                                  setState(() => _searchQuery = v),
+                            ),
                           ),
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 10),
-                        ),
-                        onChanged: (v) =>
-                            setState(() => _searchQuery = v),
+                          const SizedBox(width: 8),
+                          _buildFilterButton(colorScheme),
+                        ],
                       ),
                     ),
                     // 模板筛选
@@ -180,7 +203,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                               side: BorderSide.none,
                             ),
                           ),
-                          ...templates.map((t) {
+                          ...topLevelTemplates.map((t) {
                             return Padding(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 4, vertical: 6),
@@ -217,6 +240,48 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                     ),
                   ],
                 ),
+    );
+  }
+
+  // ========== 筛选按钮 ==========
+  Widget _buildFilterButton(ColorScheme colorScheme) {
+    return Badge(
+      isLabelVisible: _filterState.isActive,
+      child: IconButton.filledTonal(
+        icon: const Icon(Icons.filter_list, size: 20),
+        onPressed: () => _showFilterSheet(),
+        style: IconButton.styleFrom(
+          backgroundColor:
+              colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
+        ),
+      ),
+    );
+  }
+
+  void _showFilterSheet() {
+    final templateState = ref.read(templateListProvider);
+    final reviewState = ref.read(reviewListProvider);
+    final selectedTemplate = _selectedTemplateId != null
+        ? templateState.templates
+            .where((t) => t.id == _selectedTemplateId)
+            .firstOrNull
+        : null;
+    final maxEvalCount = reviewState.items
+        .map((r) => r.evaluations.length)
+        .fold(0, (a, b) => a > b ? a : b);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => FilterBottomSheet(
+        initialFilter: _filterState,
+        selectedTemplate: selectedTemplate,
+        maxEvalCount: maxEvalCount,
+        onChanged: (filter) => setState(() => _filterState = filter),
+      ),
     );
   }
 

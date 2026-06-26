@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,9 +7,11 @@ import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 
 import '../../data/repositories/local_json_review_repository.dart';
+import '../../providers/draft_provider.dart';
 import '../../providers/review_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../services/sync_service.dart';
+import 'draft_list_page.dart';
 import 'sync_settings_page.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
@@ -24,6 +28,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   void initState() {
     super.initState();
     _loadImageCount();
+    Future.microtask(() {
+      ref.read(draftListProvider.notifier).loadAll();
+    });
   }
 
   Future<void> _loadImageCount() async {
@@ -153,6 +160,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             onTap: () {
               Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const RecycleBinPage()),
+              );
+            },
+          ),
+          const SizedBox(height: 8),
+          _DraftBoxCard(
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const DraftListPage()),
               );
             },
           ),
@@ -339,33 +354,164 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             child: const Text('取消'),
           ),
           FilledButton(
-            onPressed: () async {
+            onPressed: () {
               Navigator.pop(ctx);
-              final success = await ref
-                  .read(reviewListProvider.notifier)
-                  .clearAll();
-              if (mounted) {
-                if (success) {
-                  await ref.read(syncServiceProvider).forgetPulledBackup();
-                  await _loadImageCount();
-                  ScaffoldMessenger.of(
-                    context,
-                  ).showSnackBar(const SnackBar(content: Text('已清空全部数据')));
-                } else {
-                  ScaffoldMessenger.of(
-                    context,
-                  ).showSnackBar(const SnackBar(content: Text('清空失败')));
-                }
-              }
+              _showBackupDialog(context);
             },
             style: FilledButton.styleFrom(
               backgroundColor: const Color(0xFFEF5350),
             ),
-            child: const Text('确认清空'),
+            child: const Text('继续'),
           ),
         ],
       ),
     );
+  }
+
+  void _showBackupDialog(BuildContext context) {
+    showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('备份数据'),
+        content: const Text('清空数据前，是否需要备份当前数据？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'skip'),
+            child: const Text('跳过备份'),
+          ),
+          OutlinedButton(
+            onPressed: () => Navigator.pop(ctx, 'local'),
+            child: const Text('备份到本地'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, 'cloud'),
+            child: const Text('备份到云端'),
+          ),
+        ],
+      ),
+    ).then((choice) async {
+      if (choice == null || !mounted) return;
+
+      if (choice == 'local') {
+        await _backupToLocalThenClear(context);
+      } else if (choice == 'cloud') {
+        await _backupToCloudThenClear(context);
+      } else if (choice == 'skip') {
+        await _doClearAll(context);
+      }
+    });
+  }
+
+  Future<void> _backupToLocalThenClear(BuildContext context) async {
+    try {
+      // 让用户选择导出目录
+      final dir = await FilePicker.platform.getDirectoryPath();
+      if (dir == null || !mounted) return;
+
+      final now = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+      final zipPath = p.join(dir, 'pre_clear_backup_$now.zip');
+
+      final repo =
+          ref.read(reviewRepositoryProvider) as LocalJsonReviewRepository;
+      await repo.exportBackup(zipPath);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('备份已保存到 $zipPath')),
+        );
+        await _doClearAll(context);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('备份失败：$e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _backupToCloudThenClear(BuildContext context) async {
+    final svc = ref.read(syncServiceProvider);
+    if (!svc.isConfigured) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('未配置云端服务器，无法备份到云端')),
+        );
+      }
+      return;
+    }
+
+    // 显示加载
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(
+        title: Text('云端备份中...'),
+        content: Row(children: [
+          CircularProgressIndicator(),
+          SizedBox(width: 16),
+          Text('正在打包并上传数据...'),
+        ]),
+      ),
+    );
+
+    try {
+      final repo =
+          ref.read(reviewRepositoryProvider) as LocalJsonReviewRepository;
+
+      final tempZip = p.join(
+        Directory.systemTemp.path,
+        'pre_clear_cloud_${DateTime.now().millisecondsSinceEpoch}.zip',
+      );
+      await repo.exportBackup(tempZip);
+      final zipToUpload = File(tempZip);
+
+      final uploadedBackup = await svc.pushFullBackup(zipToUpload);
+      final verified = uploadedBackup != null &&
+          uploadedBackup.isNotEmpty &&
+          await svc.verifyBackupMatches(uploadedBackup, zipToUpload);
+
+      try {
+        await zipToUpload.delete();
+      } catch (_) {}
+
+      if (mounted) {
+        Navigator.pop(context); // dismiss loading
+        if (verified) {
+          await svc.markPulledBackup(uploadedBackup);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('云端备份成功')),
+          );
+          await _doClearAll(context);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('云端备份失败，数据未清空')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // dismiss loading
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('云端备份失败：$e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _doClearAll(BuildContext context) async {
+    final success = await ref.read(reviewListProvider.notifier).clearAll();
+    if (mounted) {
+      if (success) {
+        await ref.read(syncServiceProvider).forgetPulledBackup();
+        await _loadImageCount();
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('已清空全部数据')));
+      } else {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('清空失败')));
+      }
+    }
   }
 }
 
@@ -686,6 +832,59 @@ class _RecycleBinPageState extends ConsumerState<RecycleBinPage> {
                     );
                   },
                 ),
+    );
+  }
+}
+// ========== 草稿箱入口卡片 ==========
+
+class _DraftBoxCard extends ConsumerWidget {
+  final VoidCallback onTap;
+  const _DraftBoxCard({required this.onTap});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final draftState = ref.watch(draftListProvider);
+    final count = draftState.items.length;
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Card(
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(
+              color: colorScheme.outlineVariant.withValues(alpha: 0.3)),
+        ),
+        child: ListTile(
+          leading: Icon(Icons.drafts_outlined, color: colorScheme.primary),
+          title: Text('草稿箱', style: TextStyle(color: colorScheme.primary)),
+          subtitle: Text(count > 0 ? '$count 条未完成的评分' : '暂无草稿'),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (count > 0)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                      color: const Color(0xFFFF9F0A).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8)),
+                  child: Text('$count',
+                      style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFFFF9F0A))),
+                ),
+              const SizedBox(width: 8),
+              const Icon(Icons.chevron_right),
+            ],
+          ),
+          onTap: onTap,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+      ),
     );
   }
 }

@@ -8,16 +8,19 @@ import 'package:uuid/uuid.dart';
 import '../../core/constants/templates.dart' as tmpl;
 import '../../core/utils/category_guesser.dart';
 import '../../core/utils/score_utils.dart';
+import '../../data/models/draft_item.dart';
 import '../../data/models/evaluation.dart';
 import '../../data/models/review_item.dart';
 import '../../data/models/scoring_template.dart';
 import '../../data/repositories/local_json_review_repository.dart';
+import '../../providers/draft_provider.dart';
 import '../../providers/review_provider.dart';
 
 class ReviewFormPage extends ConsumerStatefulWidget {
   final ReviewItem? existingItem;
+  final String? draftId; // 从草稿恢复时传入
 
-  const ReviewFormPage({super.key, this.existingItem});
+  const ReviewFormPage({super.key, this.existingItem, this.draftId});
 
   @override
   ConsumerState<ReviewFormPage> createState() => _ReviewFormPageState();
@@ -42,12 +45,30 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
   bool _recommendToFriends = false;
   String? _guessedCategory;
   bool _isSaving = false;
+  bool _isDirty = false;
+  bool _poppedBySave = false; // 标记是否因保存退出，避免重复弹窗
 
   bool get isEditing => widget.existingItem != null;
+  bool get isFromDraft => widget.draftId != null;
 
   @override
   void initState() {
     super.initState();
+
+    if (widget.draftId != null) {
+      // 从草稿恢复
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _loadDraft(widget.draftId!);
+      });
+    } else {
+      _initFromExisting();
+    }
+
+    _titleController.addListener(_onChanged);
+    _reviewTextController.addListener(_onChanged);
+  }
+
+  void _initFromExisting() {
     final item = widget.existingItem;
     _category = item?.category ?? 'food';
     _dimensions = item?.dimensions != null && item!.dimensions.isNotEmpty
@@ -66,13 +87,47 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
       _reviewTextController.text = item.reviewText;
     }
 
-    _titleController.addListener(_onTextChanged);
-    _reviewTextController.addListener(_onTextChanged);
-
     // 延迟加载模板并初始化维度
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initDimensions();
     });
+  }
+
+  void _loadDraft(String draftId) {
+    final draft = ref.read(draftListProvider.notifier).getById(draftId);
+    if (draft == null) {
+      _initFromExisting();
+      return;
+    }
+    _category = draft.category;
+    _dimensions = Map<String, double>.from(draft.dimensions);
+    _imagePaths = List<String>.from(draft.imagePaths);
+    _tags = List<String>.from(draft.tags);
+    _worth = draft.worth;
+    _revisit = draft.revisit;
+    _recommendToFriends = draft.recommendToFriends;
+    _titleController.text = draft.title;
+    _reviewTextController.text = draft.reviewText;
+
+    _isDirty = true; // 草稿视为有修改
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initDimensions();
+      setState(() {});
+    });
+  }
+
+  void _onChanged() {
+    if (!_isDirty) {
+      setState(() => _isDirty = true);
+    }
+    // 同时处理分类猜测
+    if (!isEditing && !isFromDraft) {
+      final text = '${_titleController.text} ${_reviewTextController.text}';
+      final guessed = guessCategory(text);
+      if (guessed != _category && _guessedCategory != guessed) {
+        setState(() => _guessedCategory = guessed);
+      }
+    }
   }
 
   void _initDimensions() {
@@ -83,15 +138,7 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
     }
   }
 
-  void _onTextChanged() {
-    if (!isEditing) {
-      final text = '${_titleController.text} ${_reviewTextController.text}';
-      final guessed = guessCategory(text);
-      if (guessed != _category && _guessedCategory != guessed) {
-        setState(() => _guessedCategory = guessed);
-      }
-    }
-  }
+
 
   @override
   void dispose() {
@@ -105,22 +152,35 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(isEditing ? '编辑评分' : '新增评分'),
-        actions: [
-          TextButton(
-            onPressed: _isSaving ? null : _save,
-            child: _isSaving
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text('保存'),
-          ),
-        ],
-      ),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final shouldPop = await _onWillPop();
+        if (shouldPop && mounted) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(isFromDraft
+              ? '继续编辑（草稿）'
+              : isEditing
+                  ? '编辑评分'
+                  : '新增评分'),
+          actions: [
+            TextButton(
+              onPressed: _isSaving ? null : _save,
+              child: _isSaving
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('保存'),
+            ),
+          ],
+        ),
       body: Form(
         key: _formKey,
         child: ListView(
@@ -407,7 +467,8 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
           ],
         ),
       ),
-    );
+    ),
+  );
   }
 
   void _addTag() {
@@ -704,16 +765,109 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
 
     if (mounted) {
       if (success) {
+        // 成功后若来自草稿则删除草稿
+        if (isFromDraft) {
+          await ref.read(draftListProvider.notifier).delete(widget.draftId!);
+        }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
               content: Text(isEditing ? '已更新' : '已保存')),
         );
+        _poppedBySave = true;
         Navigator.of(context).pop();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('保存失败，请重试')),
         );
       }
+    }
+  }
+
+  // ========== 草稿相关 ==========
+
+  DraftItem _buildDraftItem({String? existingId}) {
+    final now = DateTime.now();
+    return DraftItem(
+      id: existingId ?? _uuid.v4(),
+      title: _titleController.text.trim(),
+      category: _category,
+      worth: _worth,
+      revisit: _revisit,
+      recommendToFriends: _recommendToFriends,
+      tags: List<String>.from(_tags),
+      dimensions: Map<String, double>.from(_dimensions),
+      imagePaths: List<String>.from(_imagePaths),
+      reviewText: _reviewTextController.text.trim(),
+      createdAt: existingId != null ? now : now,
+      updatedAt: now,
+    );
+  }
+
+  Future<void> _saveToDraft() async {
+    if (isFromDraft) {
+      // 更新已有草稿
+      final draft = _buildDraftItem(existingId: widget.draftId);
+      await ref.read(draftListProvider.notifier).updateDraft(draft);
+    } else {
+      // 新建草稿
+      final draft = _buildDraftItem();
+      await ref.read(draftListProvider.notifier).add(draft);
+    }
+  }
+
+  /// 返回 true 表示可以退出
+  Future<bool> _onWillPop() async {
+    if (_poppedBySave) return true;
+
+    // 检查是否有实质内容
+    final hasContent = _titleController.text.trim().isNotEmpty ||
+        _reviewTextController.text.trim().isNotEmpty ||
+        _tags.isNotEmpty ||
+        _imagePaths.isNotEmpty;
+
+    if (!hasContent && !_isDirty) return true;
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('未保存的内容'),
+        content: const Text('当前编辑的内容尚未保存，是否存入草稿箱？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'discard'),
+            child: const Text('放弃'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'cancel'),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, 'draft'),
+            child: const Text('存入草稿箱'),
+          ),
+        ],
+      ),
+    );
+
+    switch (result) {
+      case 'draft':
+        await _saveToDraft();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('已存入草稿箱')),
+          );
+        }
+        return true;
+      case 'discard':
+        // 如果是来自草稿，抛弃时顺便删除旧草稿
+        if (isFromDraft) {
+          await ref.read(draftListProvider.notifier).delete(widget.draftId!);
+        }
+        return true;
+      case 'cancel':
+        return false;
+      default:
+        return false;
     }
   }
 }
