@@ -1,7 +1,9 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart' show Colors;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/theme/app_design_tokens.dart';
 import '../../providers/draft_provider.dart';
 import '../../data/models/draft_item.dart';
 import '../review_form/review_form_page.dart';
@@ -25,39 +27,35 @@ class _DraftListPageState extends ConsumerState<DraftListPage> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(draftListProvider);
-    final cs = Theme.of(context).colorScheme;
+    final brightness = CupertinoTheme.brightnessOf(context);
 
-    return Scaffold(
-      backgroundColor: _bg(context),
-      appBar: AppBar(
-        title: const Text('草稿箱'),
-        backgroundColor: _bg(context),
-        surfaceTintColor: Colors.transparent,
-        actions: state.items.isNotEmpty
-            ? [
-                IconButton(
-                  icon: const Icon(Icons.delete_sweep_outlined),
-                  tooltip: '清空草稿箱',
-                  onPressed: _clearAllDrafts,
-                ),
-              ]
+    return CupertinoPageScaffold(
+      backgroundColor: AppTokens.bg(brightness),
+      navigationBar: CupertinoNavigationBar(
+        middle: const Text('草稿箱'),
+        backgroundColor: AppTokens.bg(brightness).withValues(alpha: 0.85),
+        border: null,
+        trailing: state.items.isNotEmpty
+            ? GestureDetector(
+                onTap: _clearAllDrafts,
+                child: const Icon(CupertinoIcons.delete_solid, size: 22),
+              )
             : null,
       ),
-      body: state.isLoading
-          ? const Center(child: CircularProgressIndicator())
+      child: state.isLoading
+          ? const Center(child: CupertinoActivityIndicator())
           : state.items.isEmpty
               ? Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.drafts_outlined,
-                          size: 64, color: cs.outline.withValues(alpha: 0.4)),
+                      Icon(CupertinoIcons.doc_plaintext,
+                          size: 64, color: AppTokens.txt3(brightness)),
                       const SizedBox(height: 16),
                       Text(
                         '草稿箱为空',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: cs.outline.withValues(alpha: 0.6),
+                        style: TextStyle(fontSize: 16,
+                          color: AppTokens.txt2(brightness),
                         ),
                       ),
                     ],
@@ -75,40 +73,32 @@ class _DraftListPageState extends ConsumerState<DraftListPage> {
     );
   }
 
-  Color _bg(BuildContext context) {
-    return Theme.of(context).brightness == Brightness.dark
-        ? const Color(0xFF000000)
-        : const Color(0xFFF2F2F7);
-  }
-
   void _openDraft(DraftItem draft) async {
     await Navigator.of(context).push(
-      MaterialPageRoute(
+      CupertinoPageRoute(
         builder: (_) => ReviewFormPage(draftId: draft.id),
       ),
     );
-    // 返回后刷新草稿列表
     if (mounted) {
       ref.read(draftListProvider.notifier).loadAll();
     }
   }
 
   void _deleteDraft(DraftItem draft) async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showCupertinoDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (ctx) => CupertinoAlertDialog(
         title: const Text('删除草稿'),
-        content: Text('确定要删除「${draft.title.isNotEmpty ? draft.title : "无标题"}」吗？'),
+        content: Text(
+            '确定要删除「${draft.title.isNotEmpty ? draft.title : "无标题"}」吗？'),
         actions: [
-          TextButton(
+          CupertinoDialogAction(
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text('取消'),
           ),
-          FilledButton(
+          CupertinoDialogAction(
+            isDestructiveAction: true,
             onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFEF5350),
-            ),
             child: const Text('删除'),
           ),
         ],
@@ -121,21 +111,19 @@ class _DraftListPageState extends ConsumerState<DraftListPage> {
   }
 
   void _clearAllDrafts() async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showCupertinoDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (ctx) => CupertinoAlertDialog(
         title: const Text('清空草稿箱'),
         content: const Text('确定要清空所有草稿吗？此操作不可撤销。'),
         actions: [
-          TextButton(
+          CupertinoDialogAction(
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text('取消'),
           ),
-          FilledButton(
+          CupertinoDialogAction(
+            isDestructiveAction: true,
             onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFEF5350),
-            ),
             child: const Text('清空'),
           ),
         ],
@@ -165,107 +153,89 @@ class _DraftCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final brightness = CupertinoTheme.brightnessOf(context);
     final dateStr = DateFormat('MM-dd HH:mm').format(draft.updatedAt);
     final title = draft.title.isNotEmpty ? draft.title : '无标题';
     final preview =
         draft.reviewText.isNotEmpty ? draft.reviewText : '暂无评价内容';
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Card(
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: BorderSide(
-            color: cs.outlineVariant.withValues(alpha: 0.3),
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppTokens.card(brightness),
+          borderRadius: BorderRadius.circular(AppTokens.radiusMD),
+          border: Border.all(
+            color: AppTokens.sep(brightness).withValues(alpha: 0.6),
           ),
         ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFF9F0A).withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(
-                        Icons.drafts_rounded,
-                        size: 20,
-                        color: Color(0xFFFF9F0A),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: AppTokens.warning.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(CupertinoIcons.doc_plaintext,
+                      size: 18, color: AppTokens.warning),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
                         title,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontWeight: FontWeight.w600,
+                          fontSize: AppTokens.fontSizeCardTitle,
+                          color: AppTokens.txt(brightness),
+                        ),
                       ),
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.delete_outline,
-                          size: 20, color: cs.outline.withValues(alpha: 0.6)),
-                      onPressed: onDelete,
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  preview,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: cs.outline,
+                      const SizedBox(height: 2),
+                      Text(
+                        preview,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: AppTokens.fontSizeCaption,
+                          color: AppTokens.txt2(brightness),
+                        ),
+                      ),
+                    ],
                   ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Icon(Icons.access_time, size: 13, color: cs.outline),
-                    const SizedBox(width: 4),
-                    Text(
-                      dateStr,
-                      style: TextStyle(fontSize: 11, color: cs.outline),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: onDelete,
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppTokens.danger.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    if (draft.tags.isNotEmpty) ...[
-                      const SizedBox(width: 12),
-                      Icon(Icons.label_outline, size: 13, color: cs.outline),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${draft.tags.length} 个标签',
-                        style: TextStyle(fontSize: 11, color: cs.outline),
-                      ),
-                    ],
-                    if (draft.imagePaths.isNotEmpty) ...[
-                      const SizedBox(width: 12),
-                      Icon(Icons.photo_outlined, size: 13, color: cs.outline),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${draft.imagePaths.length} 张图片',
-                        style: TextStyle(fontSize: 11, color: cs.outline),
-                      ),
-                    ],
-                  ],
+                    child: const Icon(CupertinoIcons.trash,
+                        size: 16, color: AppTokens.danger),
+                  ),
                 ),
               ],
             ),
-          ),
+            const SizedBox(height: 10),
+            Text(
+              dateStr,
+              style: TextStyle(fontSize: AppTokens.fontSizeSmall,
+                color: AppTokens.txt2(brightness),
+              ),
+            ),
+          ],
         ),
       ),
     );

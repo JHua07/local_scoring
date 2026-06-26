@@ -1,11 +1,13 @@
-import 'dart:io';
+﻿import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 
+import '../../core/theme/app_design_tokens.dart';
 import '../../data/repositories/local_json_review_repository.dart';
 import '../../providers/draft_provider.dart';
 import '../../providers/review_provider.dart';
@@ -21,7 +23,11 @@ class SettingsPage extends ConsumerStatefulWidget {
   ConsumerState<SettingsPage> createState() => _SettingsPageState();
 }
 
-class _SettingsPageState extends ConsumerState<SettingsPage> {
+class _SettingsPageState extends ConsumerState<SettingsPage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
   int _imageCount = 0;
 
   @override
@@ -44,163 +50,123 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final state = ref.watch(reviewListProvider);
-    final colorScheme = Theme.of(context).colorScheme;
+    final brightness = CupertinoTheme.brightnessOf(context);
     final items = state.items;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('设置')),
-      body: ListView(
-        padding: const EdgeInsets.only(bottom: 32),
-        children: [
-          // 数据说明
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
-            child: Text(
-              '本地数据',
-              style: Theme.of(
-                context,
-              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
-            ),
+    return CupertinoPageScaffold(
+      backgroundColor: AppTokens.bg(brightness),
+      child: CustomScrollView(
+        slivers: [
+          CupertinoSliverNavigationBar(
+            largeTitle: const Text('设置'),
+            backgroundColor:
+                AppTokens.bg(brightness).withValues(alpha: 0.85),
+            border: null,
           ),
-          _InfoCard(
-            children: [
-              _InfoRow(
-                icon: Icons.rate_review_outlined,
-                label: '评分条数',
-                value: '${items.length}',
-              ),
-              const Divider(height: 1),
-              _InfoRow(
-                icon: Icons.photo_library_outlined,
-                label: '图片数量',
-                value: '$_imageCount',
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Text(
-              '所有数据保存在本地，不经过任何服务器。'
-              '数据文件位于应用文档目录下的 private_review_app 文件夹。'
-              '图片保存为独立的图片文件，JSON 中仅保存图片路径。',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurface.withValues(alpha: 0.5),
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 28),
-
-          // 主题设置
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-            child: Text(
-              '外观',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleSmall
-                  ?.copyWith(fontWeight: FontWeight.w600),
-            ),
-          ),
-          _buildThemeSelector(context),
-
-          const SizedBox(height: 28),
-
-          // 数据同步
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-            child: Text(
-              '数据同步',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleSmall
-                  ?.copyWith(fontWeight: FontWeight.w600),
-            ),
-          ),
-          _ActionCard(
-            icon: Icons.sync,
-            title: '服务器同步',
-            subtitle: '连接自建服务器，上传和拉取数据',
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const SyncSettingsPage()),
-              );
-            },
-          ),
-
-          const SizedBox(height: 28),
-
-          // 操作
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-            child: Text(
-              '数据备份',
-              style: Theme.of(
-                context,
-              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
-            ),
-          ),
-          _ActionCard(
-            icon: Icons.file_download_outlined,
-            title: '导出备份（ZIP）',
-            subtitle: '按分类打包评分、评价和图片为压缩包',
-            onTap: () => _exportBackup(context),
-          ),
-          const SizedBox(height: 8),
-          _ActionCard(
-            icon: Icons.file_upload_outlined,
-            title: '导入备份',
-            subtitle: '从压缩包恢复数据（不覆盖已有记录）',
-            onTap: () => _importBackup(context),
-          ),
-          const SizedBox(height: 8),
-          _RecycleBinCard(
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const RecycleBinPage()),
-              );
-            },
-          ),
-          const SizedBox(height: 8),
-          _DraftBoxCard(
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const DraftListPage()),
-              );
-            },
-          ),
-          const SizedBox(height: 28),
-
-          // 危险操作
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-            child: Text(
-              '危险操作',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w600,
-                color: const Color(0xFFEF5350),
-              ),
-            ),
-          ),
-          _ActionCard(
-            icon: Icons.delete_forever_outlined,
-            title: '清空全部数据',
-            subtitle: '删除所有评分和图片，此操作不可撤销',
-            isDanger: true,
-            onTap: () => _confirmClearAll(context),
-          ),
-
-          const SizedBox(height: 40),
-
-          // 版本信息
-          Center(
-            child: Text(
-              'private_review_app v1.0.0',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurface.withValues(alpha: 0.3),
-              ),
+          SliverToBoxAdapter(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const _SettingsSectionTitle(title: '本地数据'),
+                _InfoCard(
+                  children: [
+                    _InfoRow(
+                      icon: CupertinoIcons.doc_text,
+                      label: '评分条数',
+                      value: '${items.length}',
+                    ),
+                    Divider(
+                        color: AppTokens.sep(brightness).withValues(alpha: 0.5),
+                        height: 1),
+                    _InfoRow(
+                      icon: CupertinoIcons.photo,
+                      label: '图片数量',
+                      value: '$_imageCount',
+                    ),
+                  ],
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppTokens.pagePaddingH,
+                    AppTokens.spaceSM,
+                    AppTokens.pagePaddingH,
+                    0,
+                  ),
+                  child: Text(
+                    '所有数据保存在本地，不经过任何服务器。',
+                    style: TextStyle(fontSize: AppTokens.fontSizeCaption,
+                      color: AppTokens.txt3(brightness),
+                    ),
+                  ),
+                ),
+                const _SettingsSectionTitle(title: '外观'),
+                _buildThemeSelector(context),
+                const _SettingsSectionTitle(title: '数据同步'),
+                _ActionRow(
+                  icon: CupertinoIcons.arrow_2_squarepath,
+                  title: '服务器同步',
+                  subtitle: '连接自建服务器，上传和拉取数据',
+                  onTap: () {
+                    Navigator.of(context).push(
+                      CupertinoPageRoute(
+                        builder: (_) => const SyncSettingsPage(),
+                      ),
+                    );
+                  },
+                ),
+                const _SettingsSectionTitle(title: '数据备份'),
+                _ActionRow(
+                  icon: CupertinoIcons.square_arrow_down,
+                  title: '导出备份（ZIP）',
+                  subtitle: '按分类打包评分、评价和图片为压缩包',
+                  onTap: () => _exportBackup(context),
+                ),
+                _ActionRow(
+                  icon: CupertinoIcons.square_arrow_up,
+                  title: '导入备份',
+                  subtitle: '从压缩包恢复数据（不覆盖已有记录）',
+                  onTap: () => _importBackup(context),
+                ),
+                _RecycleBinCard(
+                  onTap: () {
+                    Navigator.of(context).push(
+                      CupertinoPageRoute(
+                        builder: (_) => const RecycleBinPage(),
+                      ),
+                    );
+                  },
+                ),
+                _DraftBoxCard(
+                  onTap: () {
+                    Navigator.of(context).push(
+                      CupertinoPageRoute(
+                        builder: (_) => const DraftListPage(),
+                      ),
+                    );
+                  },
+                ),
+                const _SettingsSectionTitle(
+                    title: '危险操作', isDanger: true),
+                _ActionRow(
+                  icon: CupertinoIcons.trash,
+                  title: '清空全部数据',
+                  subtitle: '删除所有评分和图片，此操作不可撤销',
+                  isDanger: true,
+                  onTap: () => _confirmClearAll(context),
+                ),
+                const SizedBox(height: 40),
+                Center(
+                  child: Text(
+                    'private_review_app v1.0.0',
+                    style: TextStyle(fontSize: AppTokens.fontSizeCaption,
+                      color: AppTokens.txt3(brightness),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppTokens.space3XL),
+              ],
             ),
           ),
         ],
@@ -210,41 +176,64 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   Widget _buildThemeSelector(BuildContext context) {
     final currentTheme = ref.watch(themeProvider);
-    final cs = Theme.of(context).colorScheme;
+    final brightness = CupertinoTheme.brightnessOf(context);
+
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppTokens.pagePaddingH),
       child: Container(
         decoration: BoxDecoration(
-          color: cs.surfaceContainerHighest.withValues(alpha: 0.4),
-          borderRadius: BorderRadius.circular(16),
+          color: AppTokens.card(brightness),
+          borderRadius: BorderRadius.circular(AppTokens.radiusMD),
+          border: Border.all(
+            color: AppTokens.sep(brightness).withValues(alpha: 0.6),
+          ),
         ),
-        child: Material(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.circular(16),
-          child: Column(
+        child: Column(
           children: ThemeMode.values.map((mode) {
             final isSelected = currentTheme == mode;
             final (icon, label) = switch (mode) {
-              ThemeMode.light => (Icons.light_mode, '浅色模式'),
-              ThemeMode.dark => (Icons.dark_mode, '暗色模式'),
-              ThemeMode.system => (Icons.settings_brightness, '跟随系统'),
+              ThemeMode.light =>
+                (CupertinoIcons.sun_max, '浅色模式'),
+              ThemeMode.dark =>
+                (CupertinoIcons.moon, '暗色模式'),
+              ThemeMode.system =>
+                (CupertinoIcons.gear, '跟随系统'),
             };
-            return ListTile(
-              leading: Icon(icon, color: isSelected ? cs.primary : cs.outline),
-              title: Text(label,
-                  style: TextStyle(
-                      fontWeight:
-                          isSelected ? FontWeight.w600 : FontWeight.normal)),
-              trailing: isSelected
-                  ? Icon(Icons.check, color: cs.primary)
-                  : null,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16)),
+            return GestureDetector(
               onTap: () =>
                   ref.read(themeProvider.notifier).setTheme(mode),
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 14),
+                child: Row(
+                  children: [
+                    Icon(icon,
+                        size: 20,
+                        color: isSelected
+                            ? AppTokens.primary
+                            : AppTokens.txt2(brightness)),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        label,
+                        style: TextStyle(fontSize: AppTokens.fontSizeBody,
+                          fontWeight: isSelected
+                              ? FontWeight.w600
+                              : FontWeight.normal,
+                          color: AppTokens.txt(brightness),
+                        ),
+                      ),
+                    ),
+                    if (isSelected)
+                      const Icon(CupertinoIcons.checkmark_alt,
+                          size: 20, color: AppTokens.primary),
+                  ],
+                ),
+              ),
             );
           }).toList(),
-          ),
         ),
       ),
     );
@@ -252,7 +241,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   Future<void> _exportBackup(BuildContext context) async {
     try {
-      // 让用户选择导出目录
       final dir = await FilePicker.platform.getDirectoryPath();
       if (dir == null || !mounted) return;
 
@@ -264,13 +252,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       final resultPath = await repo.exportBackup(zipPath);
 
       if (mounted) {
-        showDialog(
+        showCupertinoDialog(
           context: context,
-          builder: (ctx) => AlertDialog(
+          builder: (ctx) => CupertinoAlertDialog(
             title: const Text('导出成功'),
-            content: SelectableText('备份文件已保存到：\n$resultPath'),
+            content: Text('备份文件已保存到：\n$resultPath'),
             actions: [
-              FilledButton(
+              CupertinoDialogAction(
                 onPressed: () => Navigator.pop(ctx),
                 child: const Text('知道了'),
               ),
@@ -280,8 +268,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('导出失败：$e')));
+        _showToast('导出失败：$e');
       }
     }
   }
@@ -296,13 +283,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       final zipPath = result.files.single.path;
       if (zipPath == null) return;
 
-      showDialog(
+      showCupertinoDialog(
         context: context,
         barrierDismissible: false,
-        builder: (ctx) => const AlertDialog(
-          title: Text('导入中...'),
-          content: Row(children: [
-            CircularProgressIndicator(),
+        builder: (ctx) => CupertinoAlertDialog(
+          title: const Text('导入中...'),
+          content: const Row(children: [
+            CupertinoActivityIndicator(),
             SizedBox(width: 16),
             Text('正在恢复数据...'),
           ]),
@@ -317,14 +304,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       await _loadImageCount();
 
       if (mounted) {
-        Navigator.pop(context); // dismiss loading dialog
-        showDialog(
+        Navigator.pop(context);
+        showCupertinoDialog(
           context: context,
-          builder: (ctx) => AlertDialog(
+          builder: (ctx) => CupertinoAlertDialog(
             title: const Text('导入完成'),
             content: Text('成功导入 $count 条新记录。'),
             actions: [
-              FilledButton(
+              CupertinoDialogAction(
                 onPressed: () => Navigator.pop(ctx),
                 child: const Text('确定'),
               ),
@@ -334,33 +321,30 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       }
     } catch (e) {
       if (mounted) {
-        // dismiss loading if still showing
         Navigator.of(context).popUntil((route) => route.isFirst);
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('导入失败：$e')));
+        _showToast('导入失败：$e');
       }
     }
   }
 
   void _confirmClearAll(BuildContext context) {
-    showDialog(
+    showCupertinoDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (ctx) => CupertinoAlertDialog(
         title: const Text('确认清空'),
-        content: const Text('确定要清空全部数据吗？\n\n这将删除所有评分记录和图片文件，此操作不可撤销。'),
+        content:
+            const Text('确定要清空全部数据吗？\n\n这将删除所有评分记录和图片文件，此操作不可撤销。'),
         actions: [
-          TextButton(
+          CupertinoDialogAction(
             onPressed: () => Navigator.pop(ctx),
             child: const Text('取消'),
           ),
-          FilledButton(
+          CupertinoDialogAction(
+            isDestructiveAction: true,
             onPressed: () {
               Navigator.pop(ctx);
               _showBackupDialog(context);
             },
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFEF5350),
-            ),
             child: const Text('继续'),
           ),
         ],
@@ -369,22 +353,23 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 
   void _showBackupDialog(BuildContext context) {
-    showDialog<String>(
+    showCupertinoDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (ctx) => CupertinoAlertDialog(
         title: const Text('备份数据'),
         content: const Text('清空数据前，是否需要备份当前数据？'),
         actions: [
-          TextButton(
+          CupertinoDialogAction(
             onPressed: () => Navigator.pop(ctx, 'skip'),
             child: const Text('跳过备份'),
           ),
-          OutlinedButton(
+          CupertinoDialogAction(
             onPressed: () => Navigator.pop(ctx, 'local'),
             child: const Text('备份到本地'),
           ),
-          FilledButton(
+          CupertinoDialogAction(
             onPressed: () => Navigator.pop(ctx, 'cloud'),
+            isDefaultAction: true,
             child: const Text('备份到云端'),
           ),
         ],
@@ -404,7 +389,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   Future<void> _backupToLocalThenClear(BuildContext context) async {
     try {
-      // 让用户选择导出目录
       final dir = await FilePicker.platform.getDirectoryPath();
       if (dir == null || !mounted) return;
 
@@ -416,16 +400,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       await repo.exportBackup(zipPath);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('备份已保存到 $zipPath')),
-        );
+        _showToast('备份已保存到 $zipPath');
         await _doClearAll(context);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('备份失败：$e')),
-        );
+        _showToast('备份失败：$e');
       }
     }
   }
@@ -434,21 +414,18 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     final svc = ref.read(syncServiceProvider);
     if (!svc.isConfigured) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('未配置云端服务器，无法备份到云端')),
-        );
+        _showToast('未配置云端服务器，无法备份到云端');
       }
       return;
     }
 
-    // 显示加载
-    showDialog(
+    showCupertinoDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const AlertDialog(
+      builder: (_) => const CupertinoAlertDialog(
         title: Text('云端备份中...'),
         content: Row(children: [
-          CircularProgressIndicator(),
+          CupertinoActivityIndicator(),
           SizedBox(width: 16),
           Text('正在打包并上传数据...'),
         ]),
@@ -476,25 +453,19 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       } catch (_) {}
 
       if (mounted) {
-        Navigator.pop(context); // dismiss loading
+        Navigator.pop(context);
         if (verified) {
           await svc.markPulledBackup(uploadedBackup);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('云端备份成功')),
-          );
+          _showToast('云端备份成功');
           await _doClearAll(context);
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('云端备份失败，数据未清空')),
-          );
+          _showToast('云端备份失败，数据未清空');
         }
       }
     } catch (e) {
       if (mounted) {
-        Navigator.pop(context); // dismiss loading
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('云端备份失败：$e')),
-        );
+        Navigator.pop(context);
+        _showToast('云端备份失败：$e');
       }
     }
   }
@@ -505,13 +476,59 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       if (success) {
         await ref.read(syncServiceProvider).forgetPulledBackup();
         await _loadImageCount();
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('已清空全部数据')));
+        _showToast('已清空全部数据');
       } else {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('清空失败')));
+        _showToast('清空失败');
       }
     }
+  }
+
+  void _showToast(String message) {
+    showCupertinoDialog(
+      context: context,
+      builder: (ctx) => CupertinoAlertDialog(
+        content: Text(message),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingsSectionTitle extends StatelessWidget {
+  final String title;
+  final bool isDanger;
+
+  const _SettingsSectionTitle({
+    required this.title,
+    this.isDanger = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final brightness = CupertinoTheme.brightnessOf(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppTokens.pagePaddingH,
+        AppTokens.space2XL,
+        AppTokens.pagePaddingH,
+        AppTokens.spaceSM,
+      ),
+      child: Text(
+        title,
+        style: TextStyle(fontSize: AppTokens.fontSizeCaption,
+          fontWeight: FontWeight.w600,
+          color: isDanger
+              ? AppTokens.danger
+              : AppTokens.txt2(brightness),
+          letterSpacing: 0.3,
+        ),
+      ),
+    );
   }
 }
 
@@ -522,13 +539,17 @@ class _InfoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final brightness = CupertinoTheme.brightnessOf(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppTokens.pagePaddingH),
       child: Container(
         decoration: BoxDecoration(
-          color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
-          borderRadius: BorderRadius.circular(16),
+          color: AppTokens.card(brightness),
+          borderRadius: BorderRadius.circular(AppTokens.radiusMD),
+          border: Border.all(
+            color: AppTokens.sep(brightness).withValues(alpha: 0.6),
+          ),
         ),
         child: Column(children: children),
       ),
@@ -549,19 +570,27 @@ class _InfoRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final brightness = CupertinoTheme.brightnessOf(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding: const EdgeInsets.symmetric(
+          horizontal: 16, vertical: 14),
       child: Row(
         children: [
-          Icon(icon, size: 20),
+          Icon(icon, size: 20, color: AppTokens.txt2(brightness)),
           const SizedBox(width: 12),
-          Text(label, style: Theme.of(context).textTheme.bodyMedium),
+          Text(
+            label,
+            style: TextStyle(fontSize: AppTokens.fontSizeBody,
+              color: AppTokens.txt(brightness),
+            ),
+          ),
           const Spacer(),
           Text(
             value,
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+            style: TextStyle(fontSize: AppTokens.fontSizeBody,
+              fontWeight: FontWeight.w700,
+              color: AppTokens.txt(brightness),
+            ),
           ),
         ],
       ),
@@ -569,14 +598,14 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
-class _ActionCard extends StatelessWidget {
+class _ActionRow extends StatelessWidget {
   final IconData icon;
   final String title;
   final String subtitle;
   final VoidCallback onTap;
   final bool isDanger;
 
-  const _ActionCard({
+  const _ActionRow({
     required this.icon,
     required this.title,
     required this.subtitle,
@@ -586,37 +615,63 @@ class _ActionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final color = isDanger ? const Color(0xFFEF5350) : colorScheme.primary;
+    final brightness = CupertinoTheme.brightnessOf(context);
+    final color = isDanger ? AppTokens.danger : AppTokens.txt(brightness);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Card(
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: BorderSide(
-            color: isDanger
-                ? const Color(0xFFEF5350).withValues(alpha: 0.2)
-                : colorScheme.outlineVariant.withValues(alpha: 0.3),
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppTokens.pagePaddingH, vertical: 3),
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppTokens.card(brightness),
+            borderRadius: BorderRadius.circular(AppTokens.radiusMD),
+            border: Border.all(
+              color: isDanger
+                  ? AppTokens.danger.withValues(alpha: 0.2)
+                  : AppTokens.sep(brightness).withValues(alpha: 0.6),
+            ),
           ),
-        ),
-        child: ListTile(
-          leading: Icon(icon, color: color),
-          title: Text(title, style: TextStyle(color: color)),
-          subtitle: Text(subtitle),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: onTap,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+          child: Row(
+            children: [
+              Icon(icon, size: 22, color: color),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(fontSize: AppTokens.fontSizeBody,
+                        fontWeight: FontWeight.w500,
+                        color: color,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(fontSize: AppTokens.fontSizeCaption,
+                        color: AppTokens.txt2(brightness),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                CupertinoIcons.chevron_right,
+                size: 18,
+                color: AppTokens.txt3(brightness),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 }
-
-// ========== 回收站入口卡片 ==========
 
 class _RecycleBinCard extends ConsumerWidget {
   final VoidCallback onTap;
@@ -626,52 +681,75 @@ class _RecycleBinCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final deletedState = ref.watch(deletedListProvider);
     final count = deletedState.items.length;
-    final colorScheme = Theme.of(context).colorScheme;
+    final brightness = CupertinoTheme.brightnessOf(context);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Card(
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: BorderSide(
-              color: colorScheme.outlineVariant.withValues(alpha: 0.3)),
-        ),
-        child: ListTile(
-          leading: Icon(Icons.restore_from_trash_outlined,
-              color: colorScheme.primary),
-          title: Text('回收站', style: TextStyle(color: colorScheme.primary)),
-          subtitle: Text(count > 0 ? '$count 条待清理' : '暂无已删除评分'),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppTokens.pagePaddingH, vertical: 3),
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppTokens.card(brightness),
+            borderRadius: BorderRadius.circular(AppTokens.radiusMD),
+            border: Border.all(
+              color: AppTokens.sep(brightness).withValues(alpha: 0.6),
+            ),
+          ),
+          child: Row(
             children: [
+              const Icon(CupertinoIcons.tray, size: 22,
+                  color: AppTokens.primary),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '回收站',
+                      style: TextStyle(fontSize: AppTokens.fontSizeBody,
+                        fontWeight: FontWeight.w500,
+                        color: AppTokens.primary,
+                      ),
+                    ),
+                    Text(
+                      count > 0 ? '$count 条待清理' : '暂无已删除评分',
+                      style: TextStyle(fontSize: AppTokens.fontSizeCaption,
+                        color: AppTokens.txt2(brightness),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               if (count > 0)
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
-                      color: const Color(0xFFEF5350).withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(8)),
-                  child: Text('$count',
-                      style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFFEF5350))),
+                    color: AppTokens.danger.withValues(alpha: 0.12),
+                    borderRadius:
+                        BorderRadius.circular(AppTokens.radiusXS),
+                  ),
+                  child: Text(
+                    '$count',
+                    style: const TextStyle(fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: AppTokens.danger,
+                    ),
+                  ),
                 ),
               const SizedBox(width: 8),
-              const Icon(Icons.chevron_right),
+              Icon(CupertinoIcons.chevron_right,
+                  size: 18, color: AppTokens.txt3(brightness)),
             ],
           ),
-          onTap: onTap,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
       ),
     );
   }
 }
-
-// ========== 回收站页面 ==========
 
 class RecycleBinPage extends ConsumerStatefulWidget {
   const RecycleBinPage({super.key});
@@ -691,23 +769,28 @@ class _RecycleBinPageState extends ConsumerState<RecycleBinPage> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(deletedListProvider);
-    final colorScheme = Theme.of(context).colorScheme;
+    final brightness = CupertinoTheme.brightnessOf(context);
     final items = state.items;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('回收站')),
-      body: state.isLoading
-          ? const Center(child: CircularProgressIndicator())
+    return CupertinoPageScaffold(
+      backgroundColor: AppTokens.bg(brightness),
+      navigationBar: CupertinoNavigationBar(
+        middle: const Text('回收站'),
+        backgroundColor: AppTokens.bg(brightness).withValues(alpha: 0.85),
+        border: null,
+      ),
+      child: state.isLoading
+          ? const Center(child: CupertinoActivityIndicator())
           : items.isEmpty
               ? const Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.restore_from_trash_outlined,
-                          size: 64, color: Colors.grey),
+                      Icon(CupertinoIcons.tray, size: 64,
+                          color: AppTokens.textWeak),
                       SizedBox(height: 12),
                       Text('回收站是空的',
-                          style: TextStyle(color: Colors.grey)),
+                          style: TextStyle(color: AppTokens.textSecondary)),
                     ],
                   ),
                 )
@@ -722,112 +805,95 @@ class _RecycleBinPageState extends ConsumerState<RecycleBinPage> {
                                 .difference(item.deletedAt!)
                                 .inDays
                         : 0;
-                    return Card(
+                    return Container(
                       margin: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 4),
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          side: BorderSide(
-                              color: colorScheme.outlineVariant
-                                  .withValues(alpha: 0.3))),
-                      child: Padding(
-                        padding: const EdgeInsets.all(14),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
-                                children: [
-                                  Text(item.title,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleSmall
-                                          ?.copyWith(
-                                              fontWeight:
-                                                  FontWeight.w600)),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '${item.score.toStringAsFixed(1)} 分 · 剩余 ${remaining > 0 ? '$remaining 天' : '即将过期'}',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
-                                        ?.copyWith(
-                                          color: colorScheme.onSurface
-                                              .withValues(alpha: 0.5),
-                                        ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.restore),
-                              tooltip: '恢复',
-                              onPressed: () async {
-                                final success = await ref
-                                    .read(deletedListProvider.notifier)
-                                    .restore(item.id);
-                                if (success) {
-                                  ref
-                                      .read(reviewListProvider.notifier)
-                                      .loadAll();
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context)
-                                        .showSnackBar(
-                                      const SnackBar(
-                                          content: Text('已恢复')),
-                                    );
-                                  }
-                                }
-                              },
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.delete_forever,
-                                  color: Color(0xFFEF5350)),
-                              tooltip: '永久删除',
-                              onPressed: () async {
-                                final confirmed =
-                                    await showDialog<bool>(
-                                  context: context,
-                                  builder: (ctx) => AlertDialog(
-                                    title: const Text('永久删除'),
-                                    content: Text(
-                                        '确定永久删除「${item.title}」吗？\n此操作不可撤销。'),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () =>
-                                            Navigator.pop(ctx, false),
-                                        child: const Text('取消'),
-                                      ),
-                                      FilledButton(
-                                        onPressed: () =>
-                                            Navigator.pop(ctx, true),
-                                        style: FilledButton.styleFrom(
-                                          backgroundColor:
-                                              const Color(0xFFEF5350),
-                                        ),
-                                        child: const Text('永久删除'),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                                if (confirmed == true) {
-                                  await ref
-                                      .read(deletedListProvider.notifier)
-                                      .permanentDelete(item.id);
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context)
-                                        .showSnackBar(
-                                      const SnackBar(
-                                          content: Text('已永久删除')),
-                                    );
-                                  }
-                                }
-                              },
-                            ),
-                          ],
+                          horizontal: AppTokens.pagePaddingH, vertical: 4),
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: AppTokens.card(brightness),
+                        borderRadius:
+                            BorderRadius.circular(AppTokens.radiusMD),
+                        border: Border.all(
+                          color: AppTokens.sep(brightness)
+                              .withValues(alpha: 0.6),
                         ),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  item.title,
+                                  style: TextStyle(fontSize:
+                                        AppTokens.fontSizeCardTitle,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppTokens.txt(brightness),
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${item.score.toStringAsFixed(1)} 分 · 剩余 ${remaining > 0 ? '$remaining 天' : '即将过期'}',
+                                  style: TextStyle(fontSize: AppTokens.fontSizeCaption,
+                                    color: AppTokens.txt2(brightness),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          CupertinoButton(
+                            padding: EdgeInsets.zero,
+                            child: const Icon(CupertinoIcons.arrow_clockwise,
+                                size: 20),
+                            onPressed: () async {
+                              final success = await ref
+                                  .read(deletedListProvider.notifier)
+                                  .restore(item.id);
+                              if (success) {
+                                ref
+                                    .read(reviewListProvider.notifier)
+                                    .loadAll();
+                              }
+                            },
+                          ),
+                          const SizedBox(width: 8),
+                          CupertinoButton(
+                            padding: EdgeInsets.zero,
+                            child: const Icon(CupertinoIcons.trash,
+                                size: 20, color: AppTokens.danger),
+                            onPressed: () async {
+                              final confirmed =
+                                  await showCupertinoDialog<bool>(
+                                context: context,
+                                builder: (ctx) => CupertinoAlertDialog(
+                                  title: const Text('永久删除'),
+                                  content: Text(
+                                      '确定永久删除「${item.title}」吗？\n此操作不可撤销。'),
+                                  actions: [
+                                    CupertinoDialogAction(
+                                      onPressed: () =>
+                                          Navigator.pop(ctx, false),
+                                      child: const Text('取消'),
+                                    ),
+                                    CupertinoDialogAction(
+                                      isDestructiveAction: true,
+                                      onPressed: () =>
+                                          Navigator.pop(ctx, true),
+                                      child: const Text('永久删除'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (confirmed == true) {
+                                await ref
+                                    .read(deletedListProvider.notifier)
+                                    .permanentDelete(item.id);
+                              }
+                            },
+                          ),
+                        ],
                       ),
                     );
                   },
@@ -835,7 +901,6 @@ class _RecycleBinPageState extends ConsumerState<RecycleBinPage> {
     );
   }
 }
-// ========== 草稿箱入口卡片 ==========
 
 class _DraftBoxCard extends ConsumerWidget {
   final VoidCallback onTap;
@@ -845,44 +910,70 @@ class _DraftBoxCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final draftState = ref.watch(draftListProvider);
     final count = draftState.items.length;
-    final colorScheme = Theme.of(context).colorScheme;
+    final brightness = CupertinoTheme.brightnessOf(context);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Card(
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: BorderSide(
-              color: colorScheme.outlineVariant.withValues(alpha: 0.3)),
-        ),
-        child: ListTile(
-          leading: Icon(Icons.drafts_outlined, color: colorScheme.primary),
-          title: Text('草稿箱', style: TextStyle(color: colorScheme.primary)),
-          subtitle: Text(count > 0 ? '$count 条未完成的评分' : '暂无草稿'),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppTokens.pagePaddingH, vertical: 3),
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppTokens.card(brightness),
+            borderRadius: BorderRadius.circular(AppTokens.radiusMD),
+            border: Border.all(
+              color: AppTokens.sep(brightness).withValues(alpha: 0.6),
+            ),
+          ),
+          child: Row(
             children: [
+              const Icon(CupertinoIcons.doc_plaintext, size: 22,
+                  color: AppTokens.primary),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '草稿箱',
+                      style: TextStyle(fontSize: AppTokens.fontSizeBody,
+                        fontWeight: FontWeight.w500,
+                        color: AppTokens.primary,
+                      ),
+                    ),
+                    Text(
+                      count > 0 ? '$count 条未完成的评分' : '暂无草稿',
+                      style: TextStyle(fontSize: AppTokens.fontSizeCaption,
+                        color: AppTokens.txt2(brightness),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               if (count > 0)
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
-                      color: const Color(0xFFFF9F0A).withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(8)),
-                  child: Text('$count',
-                      style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFFFF9F0A))),
+                    color: AppTokens.warning.withValues(alpha: 0.12),
+                    borderRadius:
+                        BorderRadius.circular(AppTokens.radiusXS),
+                  ),
+                  child: Text(
+                    '$count',
+                    style: const TextStyle(fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: AppTokens.warning,
+                    ),
+                  ),
                 ),
               const SizedBox(width: 8),
-              const Icon(Icons.chevron_right),
+              Icon(CupertinoIcons.chevron_right,
+                  size: 18, color: AppTokens.txt3(brightness)),
             ],
           ),
-          onTap: onTap,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
       ),
     );

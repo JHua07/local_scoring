@@ -124,17 +124,32 @@ class _FilterBottomSheetState extends State<FilterBottomSheet> {
   @override
   Widget build(BuildContext context) {
     final isActive = _buildFilter().isActive;
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return SafeArea(
-      child: Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom,
-        ),
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2C2C2E) : Colors.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: SafeArea(
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // ---- 拖动指示条 ----
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(top: 10, bottom: 4),
+                  width: 36,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: cs.outline.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              ),
               // ---- 标题栏 ----
               Padding(
                 padding:
@@ -142,20 +157,22 @@ class _FilterBottomSheetState extends State<FilterBottomSheet> {
                 child: Row(
                   children: [
                     Text('筛选条件',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w600)),
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                          color: cs.onSurface,
+                        )),
                     const Spacer(),
-                    TextButton.icon(
-                      onPressed: isActive ? _reset : null,
-                      icon: const Icon(Icons.refresh, size: 18),
-                      label: const Text('重置'),
-                    ),
+                    if (isActive)
+                      TextButton(
+                        onPressed: _reset,
+                        child: const Text('重置',
+                            style: TextStyle(fontSize: 15)),
+                      ),
                   ],
                 ),
               ),
-              const Divider(height: 1),
+              Divider(height: 1, color: cs.outlineVariant.withValues(alpha: 0.4)),
 
               // ---- 分数范围 ----
               _buildSectionHeader('分数范围', Icons.score),
@@ -408,17 +425,25 @@ class _FilterBottomSheetState extends State<FilterBottomSheet> {
               // ---- 应用按钮 ----
               Padding(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    const EdgeInsets.fromLTRB(20, 8, 20, 24),
                 child: SizedBox(
                   width: double.infinity,
-                  child: FilledButton.icon(
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF007AFF),
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                      textStyle: const TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.w600),
+                    ),
                     onPressed: _apply,
-                    icon: const Icon(Icons.check, size: 18),
-                    label: const Text('应用筛选'),
+                    child: const Text('应用筛选'),
                   ),
                 ),
               ),
-              const SizedBox(height: 4),
             ],
           ),
         ),

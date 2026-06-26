@@ -1,12 +1,16 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart' show ThemeMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'features/home/home_page.dart';
 import 'features/library/library_page.dart';
 import 'features/ranking/ranking_page.dart';
+import 'features/review_form/review_form_page.dart';
 import 'features/settings/settings_page.dart';
 import 'providers/review_provider.dart';
 import 'providers/theme_provider.dart';
+import 'core/theme/app_design_tokens.dart';
 
 class PrivateReviewApp extends ConsumerStatefulWidget {
   const PrivateReviewApp({super.key});
@@ -28,134 +32,121 @@ class _PrivateReviewAppState extends ConsumerState<PrivateReviewApp> {
   Widget build(BuildContext context) {
     final themeMode = ref.watch(themeProvider);
 
-    return MaterialApp(
+    // 计算出真正生效的亮度——跟随系统时取系统亮度
+    final platformBrightness = MediaQuery.of(context).platformBrightness;
+    final effectiveBrightness = themeMode == ThemeMode.dark
+        ? Brightness.dark
+        : themeMode == ThemeMode.light
+            ? Brightness.light
+            : platformBrightness;
+
+    final themeData = _buildCupertinoTheme(effectiveBrightness);
+
+    return CupertinoApp(
       title: '私人评分',
       debugShowCheckedModeBanner: false,
-      themeMode: themeMode,
-      theme: _buildTheme(Brightness.light),
-      darkTheme: _buildTheme(Brightness.dark),
-      home: const MainShell(),
+      theme: themeData,
+      localizationsDelegates: <LocalizationsDelegate<dynamic>>[
+        GlobalMaterialLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('zh', 'CN'),
+        Locale('en', 'US'),
+      ],
+      home: CupertinoTheme(
+        data: themeData,
+        child: const MainShell(),
+      ),
     );
   }
 
-  ThemeData _buildTheme(Brightness brightness) {
-    const seedColor = Color(0xFF5C6BC0); // Indigo
-    final isDark = brightness == Brightness.dark;
-    final colorScheme = ColorScheme.fromSeed(
-      seedColor: seedColor,
+  CupertinoThemeData _buildCupertinoTheme(Brightness brightness) {
+    return CupertinoThemeData(
       brightness: brightness,
-    );
-
-    return ThemeData(
-      useMaterial3: true,
-      colorScheme: colorScheme,
-      scaffoldBackgroundColor: isDark
-          ? colorScheme.surface
-          : const Color(0xFFF8F7F4),
-      cardTheme: CardThemeData(
-        elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        color: isDark ? colorScheme.surfaceContainer : Colors.white,
-      ),
-      appBarTheme: AppBarTheme(
-        centerTitle: false,
-        elevation: 0,
-        scrolledUnderElevation: 1,
-        backgroundColor: isDark
-            ? colorScheme.surface
-            : const Color(0xFFF8F7F4),
-        titleTextStyle: TextStyle(
-          color: colorScheme.onSurface,
-          fontSize: 20,
+      primaryColor: AppTokens.primary,
+      scaffoldBackgroundColor: AppTokens.bg(brightness),
+      barBackgroundColor: AppTokens.bg(brightness).withValues(alpha: 0.85),
+      textTheme: CupertinoTextThemeData(
+        navLargeTitleTextStyle: TextStyle(
+          inherit: false,
+          fontSize: AppTokens.fontSizeHero,
+          fontWeight: FontWeight.w800,
+          color: AppTokens.txt(brightness),
+          letterSpacing: -0.5,
+        ),
+        navTitleTextStyle: TextStyle(
+          inherit: false,
+          fontSize: AppTokens.fontSizeCardTitle,
           fontWeight: FontWeight.w600,
+          color: AppTokens.txt(brightness),
         ),
-      ),
-      navigationBarTheme: NavigationBarThemeData(
-        elevation: 0,
-        backgroundColor: isDark
-            ? colorScheme.surfaceContainer
-            : Colors.white,
-        indicatorColor: colorScheme.primaryContainer,
-        labelTextStyle: WidgetStatePropertyAll(
-          TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-            color: colorScheme.onSurface,
-          ),
-        ),
-      ),
-      chipTheme: ChipThemeData(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        side: BorderSide.none,
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-        filled: true,
-      ),
-      floatingActionButtonTheme: FloatingActionButtonThemeData(
-        elevation: 2,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
     );
   }
 }
 
-class MainShell extends StatefulWidget {
+class MainShell extends StatelessWidget {
   const MainShell({super.key});
 
   @override
-  State<MainShell> createState() => _MainShellState();
-}
-
-class _MainShellState extends State<MainShell> {
-  int _currentIndex = 0;
-
-  final _pages = const [
-    HomePage(),
-    LibraryPage(),
-    RankingPage(),
-    SettingsPage(),
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    // 强制模拟器 viewport 正确初始化
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) setState(() {});
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: _pages[_currentIndex],
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        onDestinationSelected: (i) => setState(() => _currentIndex = i),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home),
-            label: '首页',
+    final brightness = CupertinoTheme.brightnessOf(context);
+
+    return CupertinoTabScaffold(
+      tabBar: CupertinoTabBar(
+        activeColor: AppTokens.primary,
+        inactiveColor: AppTokens.textSecondary,
+        backgroundColor: brightness == Brightness.dark
+            ? AppTokens.darkCardBackground
+            : AppTokens.cardBackground,
+        border: Border(
+          top: BorderSide(
+            color: AppTokens.sep(brightness).withValues(alpha: 0.4),
+            width: 0.5,
           ),
-          NavigationDestination(
-            icon: Icon(Icons.library_books_outlined),
-            selectedIcon: Icon(Icons.library_books),
+        ),
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(CupertinoIcons.today),
+            activeIcon: Icon(CupertinoIcons.today_fill),
+            label: '今天',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(CupertinoIcons.archivebox),
+            activeIcon: Icon(CupertinoIcons.archivebox_fill),
             label: '评分库',
           ),
-          NavigationDestination(
-            icon: Icon(Icons.leaderboard_outlined),
-            selectedIcon: Icon(Icons.leaderboard),
-            label: '排行榜',
+          BottomNavigationBarItem(
+            icon: Icon(CupertinoIcons.chart_bar),
+            activeIcon: Icon(CupertinoIcons.chart_bar_fill),
+            label: '排行',
           ),
-          NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings),
+          BottomNavigationBarItem(
+            icon: Icon(CupertinoIcons.gear),
+            activeIcon: Icon(CupertinoIcons.gear_solid),
             label: '设置',
           ),
         ],
       ),
+      tabBuilder: (context, index) {
+        switch (index) {
+          case 0:
+            return const HomePage();
+          case 1:
+            return const LibraryPage();
+          case 2:
+            return const RankingPage();
+          case 3:
+            return const SettingsPage();
+          default:
+            return const HomePage();
+        }
+      },
     );
   }
 }
+
+
+

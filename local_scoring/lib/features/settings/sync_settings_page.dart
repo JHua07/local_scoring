@@ -1,10 +1,12 @@
-import 'dart:io';
+﻿import 'dart:io';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 
+import '../../core/theme/app_design_tokens.dart';
 import '../../data/repositories/local_json_review_repository.dart';
 import '../../providers/review_provider.dart';
 import '../../services/sync_service.dart';
@@ -17,16 +19,17 @@ class SyncSettingsPage extends ConsumerStatefulWidget {
 }
 
 class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
-  static const _blue = Color(0xFF0A84FF);
-  static const _green = Color(0xFF34C759);
-  static const _orange = Color(0xFFFF9F0A);
-  static const _red = Color(0xFFFF3B30);
-
   final _urlCtrl = TextEditingController();
   bool _loading = true;
   bool _busy = false;
   String _activeLabel = '';
   String _status = '';
+
+  // Use AppTokens for colors
+  Color get _blue => AppTokens.primary;
+  Color get _green => AppTokens.success;
+  Color get _orange => AppTokens.warning;
+  Color get _red => AppTokens.danger;
 
   @override
   void initState() {
@@ -54,18 +57,17 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
   Widget build(BuildContext context) {
     final svc = ref.watch(syncServiceProvider);
     final connected = svc.isConfigured;
-    final bg = _pageBackground(context);
+    final brightness = CupertinoTheme.brightnessOf(context);
 
-    return Scaffold(
-      backgroundColor: bg,
-      appBar: AppBar(
-        title: const Text('同步设置'),
-        centerTitle: false,
-        backgroundColor: bg,
-        surfaceTintColor: Colors.transparent,
+    return CupertinoPageScaffold(
+      backgroundColor: AppTokens.bg(brightness),
+      navigationBar: CupertinoNavigationBar(
+        middle: const Text('同步设置'),
+        backgroundColor: AppTokens.bg(brightness).withValues(alpha: 0.85),
+        border: null,
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
+      child: _loading
+          ? const Center(child: CupertinoActivityIndicator())
           : ListView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
               children: [
@@ -130,8 +132,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                     ),
                     title: const Text(
                       '自动同步',
-                      style: TextStyle(
-                        fontSize: 16,
+                      style: TextStyle(fontSize: 16,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -139,9 +140,8 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                       svc.autoBackup
                           ? '间隔：${svc.backupIntervalLabel}'
                           : (connected ? '关闭' : '请先连接服务器'),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(context).colorScheme.outline,
+                      style: TextStyle(fontSize: 12,
+                        color: AppTokens.txt2(CupertinoTheme.brightnessOf(context)),
                       ),
                     ),
                     value: svc.autoBackup,
@@ -208,13 +208,13 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
   }
 
   Widget _connectionHeader(SyncService svc, bool connected) {
-    final cs = Theme.of(context).colorScheme;
+    final brightness = CupertinoTheme.brightnessOf(context);
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
       decoration: BoxDecoration(
         color: _groupColor(context),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.35)),
+        border: Border.all(color: AppTokens.sep(brightness).withValues(alpha: 0.6)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.05),
@@ -241,8 +241,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                   children: [
                     Text(
                       connected ? '已连接到服务器' : '未连接',
-                      style: const TextStyle(
-                        fontSize: 22,
+                      style: const TextStyle(fontSize: 22,
                         fontWeight: FontWeight.w800,
                         letterSpacing: 0,
                       ),
@@ -250,9 +249,8 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                     const SizedBox(height: 4),
                     Text(
                       connected ? '设备 ${svc.deviceId}' : '输入服务器地址后连接',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: cs.outline,
+                      style: TextStyle(fontSize: 13,
+                        color: AppTokens.txt2(brightness),
                         fontFamily: connected ? 'monospace' : null,
                       ),
                     ),
@@ -285,18 +283,18 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
   }
 
   Widget _compactUrlField() {
-    final cs = Theme.of(context).colorScheme;
+    final brightness = CupertinoTheme.brightnessOf(context);
     return Container(
       height: 42,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.38)),
+        border: Border.all(color: AppTokens.sep(brightness).withValues(alpha: 0.6)),
       ),
       child: Row(
         children: [
-          Icon(Icons.link_rounded, size: 18, color: _blue),
+          Icon(_busy ? CupertinoIcons.arrow_2_squarepath : Icons.network_check_rounded, size: 18, color: _blue),
           const SizedBox(width: 8),
           Expanded(
             child: TextField(
@@ -327,7 +325,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
     required String title,
     required VoidCallback onTap,
   }) {
-    final cs = Theme.of(context).colorScheme;
+    final brightness = CupertinoTheme.brightnessOf(context);
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -347,8 +345,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(
-                    fontSize: 15,
+                  style: const TextStyle(fontSize: 15,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -360,7 +357,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                   child: CircularProgressIndicator(strokeWidth: 2, color: tint),
                 )
               else
-                Icon(Icons.chevron_right_rounded, color: cs.outline, size: 21),
+                Icon(Icons.chevron_right_rounded, color: AppTokens.txt2(brightness), size: 21),
             ],
           ),
         ),
@@ -373,10 +370,9 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
       padding: const EdgeInsets.only(left: 4, bottom: 8),
       child: Text(
         text,
-        style: TextStyle(
-          fontSize: 13,
+        style: TextStyle(fontSize: 13,
           fontWeight: FontWeight.w600,
-          color: Theme.of(context).colorScheme.outline,
+          color: AppTokens.txt2(CupertinoTheme.brightnessOf(context)),
         ),
       ),
     );
@@ -409,7 +405,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
     bool showChevron = true,
   }) {
     final busy = _busy && (busyLabel == null || _activeLabel == busyLabel);
-    final cs = Theme.of(context).colorScheme;
+    final brightness = CupertinoTheme.brightnessOf(context);
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -426,8 +422,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(
-                        fontSize: 16,
+                      style: const TextStyle(fontSize: 16,
                         fontWeight: FontWeight.w600,
                         letterSpacing: 0,
                       ),
@@ -435,7 +430,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                     const SizedBox(height: 3),
                     Text(
                       subtitle,
-                      style: TextStyle(fontSize: 12, color: cs.outline),
+                      style: TextStyle(fontSize: 12, color: AppTokens.txt2(brightness)),
                     ),
                   ],
                 ),
@@ -448,7 +443,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                   child: CircularProgressIndicator(strokeWidth: 2, color: tint),
                 )
               else if (showChevron)
-                Icon(Icons.chevron_right_rounded, color: cs.outline, size: 22),
+                Icon(Icons.chevron_right_rounded, color: AppTokens.txt2(brightness), size: 22),
             ],
           ),
         ),
@@ -519,15 +514,11 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
   }
 
   Color _pageBackground(BuildContext context) {
-    return Theme.of(context).brightness == Brightness.dark
-        ? const Color(0xFF000000)
-        : const Color(0xFFF2F2F7);
+    return AppTokens.bg(CupertinoTheme.brightnessOf(context));
   }
 
   Color _groupColor(BuildContext context) {
-    return Theme.of(context).brightness == Brightness.dark
-        ? const Color(0xFF1C1C1E)
-        : Colors.white;
+    return AppTokens.card(CupertinoTheme.brightnessOf(context));
   }
 
   String _intervalLabel(BackupInterval interval) => switch (interval) {
@@ -762,10 +753,8 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
     setState(() {});
     if (!mounted) return;
 
-    showModalBottomSheet<void>(
+    showCupertinoModalPopup<void>(
       context: context,
-      useSafeArea: true,
-      backgroundColor: Colors.transparent,
       builder: (ctx) => Container(
         padding: const EdgeInsets.fromLTRB(20, 10, 20, 24),
         decoration: BoxDecoration(
@@ -801,8 +790,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                 Expanded(
                   child: Text(
                     diagnostics.healthOk ? '同步接口正常' : '同步接口异常',
-                    style: const TextStyle(
-                      fontSize: 22,
+                    style: const TextStyle(fontSize: 22,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
@@ -842,7 +830,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
   }
 
   Widget _diagnosticLine(String label, String value) {
-    final cs = Theme.of(context).colorScheme;
+    final brightness = CupertinoTheme.brightnessOf(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 7),
       child: Row(
@@ -852,9 +840,8 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
             width: 72,
             child: Text(
               label,
-              style: TextStyle(
-                fontSize: 13,
-                color: cs.outline,
+              style: TextStyle(fontSize: 13,
+                color: AppTokens.txt2(brightness),
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -862,8 +849,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
           Expanded(
             child: SelectableText(
               value,
-              style: const TextStyle(
-                fontSize: 13,
+              style: const TextStyle(fontSize: 13,
                 fontFamily: 'monospace',
                 letterSpacing: 0,
               ),
@@ -883,11 +869,8 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
     setState(() {});
     if (!mounted) return;
 
-    showModalBottomSheet<void>(
+    showCupertinoModalPopup<void>(
       context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Colors.transparent,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) {
           Future<void> refresh() async {
@@ -929,17 +912,15 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                           children: [
                             const Text(
                               '云端备份',
-                              style: TextStyle(
-                                fontSize: 24,
+                              style: TextStyle(fontSize: 24,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
                             const SizedBox(height: 4),
                             Text(
                               'data/backups 目录中的 ${list.length} 个 ZIP',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: Theme.of(context).colorScheme.outline,
+                              style: TextStyle(fontSize: 13,
+                                color: AppTokens.txt2(CupertinoTheme.brightnessOf(context)),
                               ),
                             ),
                           ],
@@ -1042,7 +1023,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
         children: [
           _iconBubble(
             Icons.folder_off_rounded,
-            Theme.of(context).colorScheme.outline,
+            AppTokens.txt2(CupertinoTheme.brightnessOf(context)),
             size: 54,
             iconSize: 28,
           ),
@@ -1054,9 +1035,8 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
           const SizedBox(height: 6),
           Text(
             '推送或上传完整备份后会出现在这里',
-            style: TextStyle(
-              fontSize: 13,
-              color: Theme.of(context).colorScheme.outline,
+            style: TextStyle(fontSize: 13,
+              color: AppTokens.txt2(CupertinoTheme.brightnessOf(context)),
             ),
             textAlign: TextAlign.center,
           ),
@@ -1071,7 +1051,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
     required VoidCallback onRestore,
     required VoidCallback onDelete,
   }) {
-    final cs = Theme.of(context).colorScheme;
+    final brightness = CupertinoTheme.brightnessOf(context);
     final name = backup['filename']?.toString() ?? '';
     final createdAt = backup['createdAt']?.toString() ?? '';
     final size = _formatBytes(backup['size']);
@@ -1080,7 +1060,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
       decoration: BoxDecoration(
         color: _pageBackground(context),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.35)),
+        border: Border.all(color: AppTokens.sep(brightness).withValues(alpha: 0.6)),
       ),
       child: Row(
         children: [
@@ -1098,8 +1078,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                         name,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 14,
+                        style: const TextStyle(fontSize: 14,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -1118,10 +1097,9 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                             color: _green.withValues(alpha: 0.28),
                           ),
                         ),
-                        child: const Text(
+                        child: Text(
                           'NEW',
-                          style: TextStyle(
-                            fontSize: 10,
+                          style: TextStyle(fontSize: 10,
                             fontWeight: FontWeight.w800,
                             color: _green,
                             letterSpacing: 0,
@@ -1137,7 +1115,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                     if (createdAt.isNotEmpty) createdAt,
                     if (size.isNotEmpty) size,
                   ].join(' · '),
-                  style: TextStyle(fontSize: 12, color: cs.outline),
+                  style: TextStyle(fontSize: 12, color: AppTokens.txt2(brightness)),
                 ),
               ],
             ),
@@ -1148,12 +1126,12 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
               IconButton(
                 tooltip: '恢复',
                 onPressed: onRestore,
-                icon: const Icon(Icons.restore_rounded, color: _blue),
+                icon: Icon(Icons.restore_rounded, color: _blue),
               ),
               IconButton(
                 tooltip: '删除',
                 onPressed: onDelete,
-                icon: const Icon(Icons.delete_outline_rounded, color: _red),
+                icon: Icon(Icons.delete_outline_rounded, color: _red),
               ),
             ],
           ),
@@ -1163,17 +1141,18 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
   }
 
   Future<bool> _confirmRestoreBackup(BuildContext context, String name) async {
-    final result = await showDialog<bool>(
+    final result = await showCupertinoDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (ctx) => CupertinoAlertDialog(
         title: const Text('恢复备份'),
         content: Text('恢复 $name 会覆盖当前本地存档，继续吗？'),
         actions: [
-          TextButton(
+          CupertinoDialogAction(
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text('取消'),
           ),
-          FilledButton(
+          CupertinoDialogAction(
+            isDefaultAction: true,
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('恢复'),
           ),
@@ -1184,19 +1163,20 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
   }
 
   Future<bool> _confirmDeleteBackup(BuildContext context, String name) async {
-    final result = await showDialog<bool>(
+    final result = await showCupertinoDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (ctx) => CupertinoAlertDialog(
         title: const Text('删除备份'),
         content: Text('确定删除 $name 吗？'),
         actions: [
-          TextButton(
+          CupertinoDialogAction(
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text('取消'),
           ),
-          TextButton(
+          CupertinoDialogAction(
+            isDestructiveAction: true,
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('删除', style: TextStyle(color: _red)),
+            child: const Text('删除'),
           ),
         ],
       ),
@@ -1229,13 +1209,5 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
     if (!mounted) return;
     _status = m;
     setState(() {});
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(m),
-        duration: const Duration(seconds: 2),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      ),
-    );
   }
 }

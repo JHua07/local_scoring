@@ -1,12 +1,15 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../core/constants/templates.dart' as tmpl;
+import '../../core/theme/app_design_tokens.dart';
 import '../../core/utils/category_guesser.dart';
 import '../../core/utils/score_utils.dart';
 import '../../core/utils/similar_record_detector.dart';
@@ -17,6 +20,7 @@ import '../../data/models/scoring_template.dart';
 import '../../data/repositories/local_json_review_repository.dart';
 import '../../providers/draft_provider.dart';
 import '../../providers/review_provider.dart';
+import '../../shared/widgets/ios_rating_row.dart';
 import '../review_detail/review_detail_page.dart';
 
 class ReviewFormPage extends ConsumerStatefulWidget {
@@ -182,7 +186,7 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final brightness = CupertinoTheme.brightnessOf(context);
 
     return PopScope(
       canPop: false,
@@ -193,320 +197,381 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
           Navigator.of(context).pop();
         }
       },
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text(isFromDraft
-              ? '继续编辑（草稿）'
-              : isEditing
-                  ? '编辑评分'
-                  : '新增评分'),
-          actions: [
-            TextButton(
-              onPressed: _isSaving ? null : _save,
-              child: _isSaving
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('保存'),
-            ),
-          ],
+      child: CupertinoPageScaffold(
+        backgroundColor: AppTokens.bg(brightness),
+        navigationBar: CupertinoNavigationBar(
+          middle: Text(
+            isFromDraft
+                ? '继续编辑（草稿）'
+                : isEditing
+                    ? '编辑评分'
+                    : '新增评分',
+          ),
+          backgroundColor: AppTokens.bg(brightness).withValues(alpha: 0.85),
+          border: null,
+          trailing: GestureDetector(
+            onTap: _isSaving ? null : _save,
+            child: _isSaving
+                ? const CupertinoActivityIndicator()
+                : const Text('保存',
+                    style: TextStyle(fontSize: 17,
+                      fontWeight: FontWeight.w600,
+                      color: AppTokens.primary,
+                    )),
+          ),
         ),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-          children: [
-            // 名称
-            TextFormField(
-              controller: _titleController,
-              decoration: InputDecoration(
-                labelText: '名称 *',
-                hintText: '例如：XX火锅、新买的耳机...',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                filled: true,
-                fillColor: colorScheme.surfaceContainerHighest
-                    .withValues(alpha: 0.3),
+        child: Form(
+          key: _formKey,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(AppTokens.pagePaddingH, 8, AppTokens.pagePaddingH, 32),
+            children: [
+              // 名称
+              CupertinoTextFormFieldRow(
+                controller: _titleController,
+                placeholder: '比如：楼下那家牛肉面',
+                prefix: const Text('名称 *',
+                    style: TextStyle(fontSize: 15,
+                      color: AppTokens.textSecondary,
+                    )),
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty) ? '请输入名称' : null,
               ),
-              validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? '请输入名称' : null,
-            ),
-            const SizedBox(height: 12),
+              const SizedBox(height: 12),
 
-            // 相似记录提示
-            _buildSimilarRecordsSection(colorScheme),
+              // 相似记录提示
+              _buildSimilarRecordsSection(brightness),
 
-            const SizedBox(height: 4),
+              const SizedBox(height: 4),
 
-            // 分类
-            Text('分类', style: Theme.of(context).textTheme.labelLarge),
-            const SizedBox(height: 8),
-            _buildTemplateSelector(),
-            if (_guessedCategory != null &&
-                _guessedCategory != _category)
+              // 分类
               Padding(
-                padding: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  '分类',
+                  style: TextStyle(fontSize: AppTokens.fontSizeCaption,
+                    fontWeight: FontWeight.w600,
+                    color: AppTokens.txt2(brightness),
+                  ),
+                ),
+              ),
+              _buildTemplateSelector(),
+              if (_guessedCategory != null &&
+                  _guessedCategory != _category)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Row(
+                    children: [
+                      const Icon(CupertinoIcons.sparkles,
+                          size: 16, color: AppTokens.primary),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          '系统猜这是：${tmpl.getTemplateName(ref.watch(templateListProvider).templates, _guessedCategory!)}，可手动修改。',
+                          style: const TextStyle(fontSize: AppTokens.fontSizeCaption,
+                            color: AppTokens.primary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 20),
+
+              // 图片
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  '图片（最多 3 张）',
+                  style: TextStyle(fontSize: AppTokens.fontSizeCaption,
+                    fontWeight: FontWeight.w600,
+                    color: AppTokens.txt2(brightness),
+                  ),
+                ),
+              ),
+              SizedBox(
+                height: 100,
                 child: Row(
                   children: [
-                    Icon(Icons.auto_awesome,
-                        size: 16, color: colorScheme.primary),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        '系统猜你这是：${tmpl.getTemplateName(ref.watch(templateListProvider).templates, _guessedCategory!)}，可手动修改。',
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(color: colorScheme.primary),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            const SizedBox(height: 20),
-
-            // 图片
-            Text(
-              '图片（最多 3 张）',
-              style: Theme.of(context).textTheme.labelLarge,
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              height: 100,
-              child: Row(
-                children: [
-                  ..._imagePaths.asMap().entries.map((entry) {
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: Stack(
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: Image.file(
-                              File(entry.value),
-                              width: 90,
-                              height: 90,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, _, _) =>
-                                  const Icon(Icons.broken_image),
+                    ..._imagePaths.asMap().entries.map((entry) {
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Stack(
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Image.file(
+                                File(entry.value),
+                                width: 90,
+                                height: 90,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, _, _) =>
+                                    const Icon(CupertinoIcons.photo, size: 24),
+                              ),
                             ),
-                          ),
-                          Positioned(
-                            top: 2,
-                            right: 2,
-                            child: GestureDetector(
-                              onTap: () {
-                                setState(() {
-                                  _imagePaths.removeAt(entry.key);
-                                });
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.all(2),
-                                decoration: const BoxDecoration(
-                                  color: Colors.black54,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(
-                                  Icons.close,
-                                  size: 16,
-                                  color: Colors.white,
+                            Positioned(
+                              top: 2,
+                              right: 2,
+                              child: GestureDetector(
+                                onTap: () {
+                                  setState(() {
+                                    _imagePaths.removeAt(entry.key);
+                                  });
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: const BoxDecoration(
+                                    color: Colors.black54,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    CupertinoIcons.xmark,
+                                    size: 16,
+                                    color: Colors.white,
+                                  ),
                                 ),
                               ),
                             ),
+                          ],
+                        ),
+                      );
+                    }),
+                    if (_imagePaths.length < 3)
+                      _AddImageButton(
+                        onTap: () => _pickImage(ImageSource.gallery),
+                        icon: CupertinoIcons.photo,
+                        label: '相册',
+                      ),
+                    if (_imagePaths.length < 3)
+                      _AddImageButton(
+                        onTap: () => _pickImage(ImageSource.camera),
+                        icon: CupertinoIcons.camera,
+                        label: '拍照',
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // 评价
+              CupertinoTextFormFieldRow(
+                controller: _reviewTextController,
+                placeholder: '留下一句话，之后翻回来会很有用。',
+                prefix: const Text('评价',
+                    style: TextStyle(fontSize: 15,
+                      color: AppTokens.textSecondary,
+                    )),
+                maxLines: 3,
+              ),
+              const SizedBox(height: 20),
+
+              // 标签
+              CupertinoTextField(
+                controller: _tagController,
+                placeholder: '输入标签后按回车添加',
+                prefix: const Padding(
+                  padding: EdgeInsets.only(left: 12, right: 8),
+                  child: Text('标签',
+                      style: TextStyle(fontSize: 15,
+                        color: AppTokens.textSecondary,
+                      )),
+                ),
+                suffix: CupertinoButton(
+                  padding: EdgeInsets.zero,
+                  onPressed: _addTag,
+                  child: const Icon(CupertinoIcons.add_circled,
+                      size: 20, color: AppTokens.primary),
+                ),
+                onSubmitted: (_) => _addTag(),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              if (_tags.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: _tags.map((tag) {
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppTokens.primary.withValues(alpha: 0.1),
+                        borderRadius:
+                            BorderRadius.circular(AppTokens.radiusFull),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            tag,
+                            style: const TextStyle(fontSize: 13,
+                              color: AppTokens.primary,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          GestureDetector(
+                            onTap: () {
+                              setState(() => _tags.remove(tag));
+                              _checkSimilarRecords();
+                            },
+                            child: const Icon(CupertinoIcons.xmark_circle_fill,
+                                size: 16,
+                                color: AppTokens.primary),
                           ),
                         ],
                       ),
                     );
-                  }),
-                  if (_imagePaths.length < 3)
-                    _AddImageButton(
-                      onTap: () => _pickImage(ImageSource.gallery),
-                      icon: Icons.photo_library_outlined,
-                      label: '相册',
-                    ),
-                  if (_imagePaths.length < 3)
-                    _AddImageButton(
-                      onTap: () => _pickImage(ImageSource.camera),
-                      icon: Icons.camera_alt_outlined,
-                      label: '拍照',
-                    ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // 评价
-            TextFormField(
-              controller: _reviewTextController,
-              decoration: InputDecoration(
-                labelText: '一句话评价',
-                hintText: '留下你的真实感受。',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
+                  }).toList(),
                 ),
-                filled: true,
-                fillColor: colorScheme.surfaceContainerHighest
-                    .withValues(alpha: 0.3),
-              ),
-              maxLines: 3,
-            ),
-            const SizedBox(height: 20),
+              ],
+              const SizedBox(height: 20),
 
-            // 标签
-            TextFormField(
-              controller: _tagController,
-              decoration: InputDecoration(
-                labelText: '标签',
-                hintText: '输入标签后按回车添加',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                filled: true,
-                fillColor: colorScheme.surfaceContainerHighest
-                    .withValues(alpha: 0.3),
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.add_circle_outline),
-                  onPressed: _addTag,
-                ),
-              ),
-              onFieldSubmitted: (_) => _addTag(),
-            ),
-            if (_tags.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 4,
-                children: _tags.map((tag) {
-                  return Chip(
-                    label: Text(tag),
-                    deleteIcon: const Icon(Icons.close, size: 16),
-                    onDeleted: () {
-                      setState(() {
-                        _tags.remove(tag);
-                      });
-                      _checkSimilarRecords();
-                    },
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                    side: BorderSide.none,
-                  );
-                }).toList(),
-              ),
-            ],
-            const SizedBox(height: 20),
-
-            // 多维评分
-            Text(
-              '多维评分',
-              style: Theme.of(context).textTheme.labelLarge,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '总分：${formatScore(calculateScore(_dimensions))}',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: colorScheme.primary,
-                  ),
-            ),
-            const SizedBox(height: 8),
-            ..._dimensions.entries.map((entry) {
-              return Padding(
+              // 多维评分
+              Padding(
                 padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  '多维评分',
+                  style: TextStyle(fontSize: AppTokens.fontSizeCaption,
+                    fontWeight: FontWeight.w600,
+                    color: AppTokens.txt2(brightness),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  '总分：${formatScore(calculateScore(_dimensions))}',
+                  style: TextStyle(fontSize: AppTokens.fontSizeTitle,
+                    fontWeight: FontWeight.w800,
+                    color: AppTokens.primary,
+                  ),
+                ),
+              ),
+              ..._dimensions.entries.map((entry) {
+                return IosRatingRow(
+                  label: entry.key,
+                  value: entry.value,
+                  onChanged: (v) {
+                    setState(() {
+                      _dimensions[entry.key] =
+                          double.parse(v.toStringAsFixed(0));
+                    });
+                  },
+                );
+              }),
+              const SizedBox(height: 16),
+
+              // 值不值
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  '这次体验值不值？',
+                  style: TextStyle(fontSize: AppTokens.fontSizeCaption,
+                    fontWeight: FontWeight.w600,
+                    color: AppTokens.txt2(brightness),
+                  ),
+                ),
+              ),
+              CupertinoSlidingSegmentedControl<String>(
+                groupValue: _worth,
+                onValueChanged: (v) {
+                  if (v != null) setState(() => _worth = v);
+                },
+                children: const {
+                  'worth': Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                    child: Text('👍 值', style: TextStyle(fontSize: 14)),
+                  ),
+                  'normal': Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                    child: Text('👌 一般', style: TextStyle(fontSize: 14)),
+                  ),
+                  'not_worth': Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                    child: Text('👎 不值', style: TextStyle(fontSize: 14)),
+                  ),
+                },
+              ),
+              const SizedBox(height: 16),
+
+              // 再次体验
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    SizedBox(
-                      width: 80,
-                      child: Text(
-                        entry.key,
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '以后还会再来吗？',
+                          style: TextStyle(fontSize: AppTokens.fontSizeBody,
+                            color: AppTokens.txt(brightness),
+                          ),
+                        ),
+                        Text(
+                          '是否再次购买 / 体验',
+                          style: TextStyle(fontSize: AppTokens.fontSizeCaption,
+                            color: AppTokens.txt2(brightness),
+                          ),
+                        ),
+                      ],
                     ),
-                    Expanded(
-                      child: Slider(
-                        value: entry.value,
-                        min: 1,
-                        max: 10,
-                        divisions: 9,
-                        label: entry.value.toStringAsFixed(0),
-                        onChanged: (v) {
-                          setState(() {
-                            _dimensions[entry.key] =
-                                double.parse(v.toStringAsFixed(0));
-                          });
-                        },
-                      ),
-                    ),
-                    SizedBox(
-                      width: 30,
-                      child: Text(
-                        entry.value.toStringAsFixed(0),
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodyMedium
-                            ?.copyWith(fontWeight: FontWeight.w600),
-                      ),
+                    CupertinoSwitch(
+                      value: _revisit,
+                      onChanged: (v) =>
+                          setState(() => _revisit = v),
                     ),
                   ],
                 ),
-              );
-            }),
-            const SizedBox(height: 16),
+              ),
+              const SizedBox(height: 8),
 
-            // 值不值
-            Text(
-              '这次体验值不值？',
-              style: Theme.of(context).textTheme.labelLarge,
-            ),
-            const SizedBox(height: 8),
-            SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(value: 'worth', label: Text('👍 值')),
-                ButtonSegment(value: 'normal', label: Text('👌 一般')),
-                ButtonSegment(
-                    value: 'not_worth', label: Text('👎 不值')),
-              ],
-              selected: {_worth},
-              onSelectionChanged: (v) =>
-                  setState(() => _worth = v.first),
-              style: ButtonStyle(
-                shape: WidgetStatePropertyAll(
-                  RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
+              // 推荐
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '推荐给朋友吗？',
+                          style: TextStyle(fontSize: AppTokens.fontSizeBody,
+                            color: AppTokens.txt(brightness),
+                          ),
+                        ),
+                        Text(
+                          '是否愿意推荐给身边的人',
+                          style: TextStyle(fontSize: AppTokens.fontSizeCaption,
+                            color: AppTokens.txt2(brightness),
+                          ),
+                        ),
+                      ],
+                    ),
+                    CupertinoSwitch(
+                      value: _recommendToFriends,
+                      onChanged: (v) =>
+                          setState(() => _recommendToFriends = v),
+                    ),
+                  ],
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
+              const SizedBox(height: 32),
 
-            // 再次体验
-            SwitchListTile(
-              value: _revisit,
-              onChanged: (v) => setState(() => _revisit = v),
-              title: const Text('什么值得再来一次？'),
-              subtitle: const Text('是否会再次购买 / 体验'),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14)),
-            ),
-            const SizedBox(height: 8),
-
-            // 推荐给朋友
-            SwitchListTile(
-              value: _recommendToFriends,
-              onChanged: (v) =>
-                  setState(() => _recommendToFriends = v),
-              title: const Text('推荐给朋友'),
-              subtitle: const Text('是否愿意推荐给身边的人'),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14)),
-            ),
-          ],
+              // 保存按钮
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: CupertinoButton.filled(
+                  onPressed: _isSaving ? null : _save,
+                  child: Text(isEditing ? '保存修改' : '保存评分'),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
-    ),
-  );
+    );
   }
 
   void _addTag() {
@@ -522,7 +587,7 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
 
   // ========== 相似记录检测 ==========
 
-  Widget _buildSimilarRecordsSection(ColorScheme colorScheme) {
+  Widget _buildSimilarRecordsSection(Brightness brightness) {
     if (_similarRecords.isEmpty) return const SizedBox.shrink();
 
     return Column(
@@ -530,14 +595,21 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
       children: [
         Row(
           children: [
-            Icon(Icons.history, size: 16, color: colorScheme.secondary),
+            const Icon(CupertinoIcons.clock, size: 16, color: AppTokens.warning),
             const SizedBox(width: 6),
-            Text(
-              '发现 ${_similarRecords.length} 条相似记录',
-              style: TextStyle(
-                fontSize: 13,
-                color: colorScheme.secondary,
+            const Text(
+              '发现相似记录',
+              style: TextStyle(fontSize: 13,
+                color: AppTokens.warning,
                 fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              '${_similarRecords.length} 条',
+              style: const TextStyle(fontSize: 13,
+                color: AppTokens.warning,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ],
@@ -552,74 +624,64 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
             itemBuilder: (context, index) {
               final result = _similarRecords[index];
               final item = result.item;
-              return Material(
-                color: colorScheme.secondaryContainer.withValues(alpha: 0.5),
-                borderRadius: BorderRadius.circular(12),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            ReviewDetailPage(reviewId: item.id),
-                      ),
-                    );
-                  },
-                  child: Container(
-                    constraints: const BoxConstraints(maxWidth: 200),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          item.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13,
-                            color: colorScheme.onSecondaryContainer,
-                          ),
+              return GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    CupertinoPageRoute(
+                      builder: (_) =>
+                          ReviewDetailPage(reviewId: item.id),
+                    ),
+                  );
+                },
+                child: Container(
+                  constraints: const BoxConstraints(maxWidth: 200),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppTokens.warning.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        item.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                          color: AppTokens.txt(brightness),
                         ),
-                        const SizedBox(height: 2),
-                        Row(
-                          children: [
-                            Icon(Icons.star,
-                                size: 12,
-                                color: colorScheme.onSecondaryContainer
-                                    .withValues(alpha: 0.7)),
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          const Icon(CupertinoIcons.star,
+                              size: 12, color: AppTokens.warning),
+                          const SizedBox(width: 2),
+                          Text(
+                            item.score.toStringAsFixed(1),
+                            style: TextStyle(fontSize: 12,
+                              color: AppTokens.txt2(brightness),
+                            ),
+                          ),
+                          if (result.matchedTagCount > 0) ...[
+                            const SizedBox(width: 8),
+                            const Icon(CupertinoIcons.tag,
+                                size: 11, color: AppTokens.warning),
                             const SizedBox(width: 2),
                             Text(
-                              item.score.toStringAsFixed(1),
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: colorScheme.onSecondaryContainer
-                                    .withValues(alpha: 0.7),
+                              '${result.matchedTagCount}个匹配标签',
+                              style: TextStyle(fontSize: 11,
+                                color: AppTokens.txt2(brightness),
                               ),
                             ),
-                            if (result.matchedTagCount > 0) ...[
-                              const SizedBox(width: 8),
-                              Icon(Icons.local_offer,
-                                  size: 11,
-                                  color: colorScheme.onSecondaryContainer
-                                      .withValues(alpha: 0.7)),
-                              const SizedBox(width: 2),
-                              Text(
-                                '${result.matchedTagCount}个匹配标签',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: colorScheme.onSecondaryContainer
-                                      .withValues(alpha: 0.7),
-                                ),
-                              ),
-                            ],
                           ],
-                        ),
-                      ],
-                    ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               );
@@ -650,14 +712,7 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ChoiceChip(
-                    label: Text('${t.icon} ${t.name}'),
-                    selected: selected,
-                    onSelected: (_) => _onTemplateSelected(t),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                    side: BorderSide.none,
-                  ),
+                  _buildTemplateChip('${t.icon} ${t.name}', selected, () => _onTemplateSelected(t)),
                   // 子模板（缩进显示）
                   if (children.isNotEmpty)
                     Padding(
@@ -666,17 +721,11 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
                         spacing: 4,
                         runSpacing: 4,
                         children: children.map((c) {
-                          return ChoiceChip(
-                            label: Text('${c.icon} ${c.name}',
-                                style: const TextStyle(fontSize: 12)),
-                            selected: _category == c.id,
-                            onSelected: (_) =>
-                                _onTemplateSelected(c),
-                            visualDensity: VisualDensity.compact,
-                            shape: RoundedRectangleBorder(
-                                borderRadius:
-                                    BorderRadius.circular(10)),
-                            side: BorderSide.none,
+                          return _buildTemplateChip(
+                            '${c.icon} ${c.name}',
+                            _category == c.id,
+                            () => _onTemplateSelected(c),
+                            isSmall: true,
                           );
                         }).toList(),
                       ),
@@ -688,12 +737,47 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
         ),
         const SizedBox(height: 8),
         // 新建自定义分类按钮
-        TextButton.icon(
+        CupertinoButton(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(CupertinoIcons.add_circled, size: 18, color: AppTokens.primary),
+              SizedBox(width: 4),
+              Text('新建自定义分类', style: TextStyle(fontSize: 14, color: AppTokens.primary)),
+            ],
+          ),
           onPressed: _showCreateTemplateDialog,
-          icon: const Icon(Icons.add_circle_outline, size: 18),
-          label: const Text('新建自定义分类'),
         ),
       ],
+    );
+  }
+
+  Widget _buildTemplateChip(String label, bool selected, VoidCallback onTap, {bool isSmall = false}) {
+    final brightness = CupertinoTheme.brightnessOf(context);
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 2),
+        padding: EdgeInsets.symmetric(
+          horizontal: isSmall ? 10 : 12,
+          vertical: isSmall ? 6 : 8,
+        ),
+        decoration: BoxDecoration(
+          color: selected ? AppTokens.primary : AppTokens.elevated(brightness),
+          borderRadius: BorderRadius.circular(AppTokens.radiusFull),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(fontSize: isSmall ? 12 : 14,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+            color: selected ? AppTokens.textOnPrimary : AppTokens.txt(brightness),
+          ),
+        ),
+      ),
     );
   }
 
@@ -721,66 +805,76 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
     final templateState = ref.read(templateListProvider);
     final topLevel = templateState.topLevel;
 
-    showDialog(
+    showCupertinoDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
+        builder: (ctx, setDialogState) => CupertinoAlertDialog(
           title: const Text('新建自定义分类'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(
-                      labelText: '分类名称 *',
-                      hintText: '例如：露营、桌游...'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: iconController,
-                  decoration: const InputDecoration(
-                      labelText: '图标 (Emoji)',
-                      hintText: '例如：🏕️'),
-                ),
-                const SizedBox(height: 12),
-                Text('评分维度（每个维度用 1-10 分滑块）',
-                    style: Theme.of(context).textTheme.labelMedium),
-                const SizedBox(height: 8),
-                ...List.generate(4, (i) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: TextField(
-                      controller: dimControllers['dim$i'],
-                      decoration: InputDecoration(
-                          labelText: '维度 ${i + 1}',
-                          hintText: i == 0 ? '例如：体验' : ''),
-                    ),
-                  );
-                }),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String?>(
-                  initialValue: parentId,
-                  items: [
-                    const DropdownMenuItem(
-                        value: null, child: Text('顶级分类（不归属任何模板）')),
-                    ...topLevel.map((t) => DropdownMenuItem(
-                        value: t.id,
-                        child: Text('${t.icon} ${t.name} 的子项'))),
-                  ],
-                  onChanged: (v) =>
-                      setDialogState(() => parentId = v),
-                  decoration:
-                      const InputDecoration(labelText: '归属模板（可选）'),
-                ),
-              ],
+          content: Material(
+            color: Colors.transparent,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CupertinoTextField(
+                    controller: nameController,
+                    placeholder: '分类名称 *',
+                    padding: const EdgeInsets.all(12),
+                  ),
+                  const SizedBox(height: 12),
+                  CupertinoTextField(
+                    controller: iconController,
+                    placeholder: '图标 (Emoji)',
+                    padding: const EdgeInsets.all(12),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('评分维度（每个维度用 1-10 分滑块）',
+                      style: TextStyle(fontSize: 13, color: AppTokens.textSecondary)),
+                  const SizedBox(height: 8),
+                  ...List.generate(4, (i) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: CupertinoTextField(
+                        controller: dimControllers['dim$i'],
+                        placeholder: i == 0 ? '例如：体验' : '维度 ${i + 1}',
+                        padding: const EdgeInsets.all(12),
+                      ),
+                    );
+                  }),
+                  const SizedBox(height: 8),
+                  const Text('归属模板（可选）：',
+                      style: TextStyle(fontSize: 13, color: AppTokens.textSecondary)),
+                  ...topLevel.map((t) => GestureDetector(
+                        onTap: () => setDialogState(() => parentId = parentId == t.id ? null : t.id),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Row(
+                            children: [
+                              Icon(
+                                parentId == t.id
+                                    ? CupertinoIcons.checkmark_circle_fill
+                                    : CupertinoIcons.circle,
+                                size: 18,
+                                color: parentId == t.id
+                                    ? AppTokens.primary
+                                    : AppTokens.textWeak,
+                              ),
+                              const SizedBox(width: 8),
+                              Text('${t.icon} ${t.name} 的子项',
+                                  style: const TextStyle(fontSize: 14)),
+                            ],
+                          ),
+                        ),
+                      )),
+                ],
+              ),
             ),
           ),
           actions: [
-            TextButton(
+            CupertinoDialogAction(
                 onPressed: () => Navigator.pop(ctx),
                 child: const Text('取消')),
-            FilledButton(
+            CupertinoDialogAction(
               onPressed: () async {
                 final name = nameController.text.trim();
                 if (name.isEmpty) return;
@@ -840,8 +934,17 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('图片选择失败：$e')),
+        showCupertinoDialog(
+          context: context,
+          builder: (ctx) => CupertinoAlertDialog(
+            content: Text('图片选择失败：$e'),
+            actions: [
+              CupertinoDialogAction(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('确定'),
+              ),
+            ],
+          ),
         );
       }
     }
@@ -850,8 +953,17 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     if (_titleController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入名称')),
+      showCupertinoDialog(
+        context: context,
+        builder: (ctx) => CupertinoAlertDialog(
+          content: const Text('请输入名称'),
+          actions: [
+            CupertinoDialogAction(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('确定'),
+            ),
+          ],
+        ),
       );
       return;
     }
@@ -915,19 +1027,23 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
 
     if (mounted) {
       if (success) {
-        // 成功后若来自草稿则删除草稿
         if (isFromDraft) {
           await ref.read(draftListProvider.notifier).delete(widget.draftId!);
         }
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(isEditing ? '已更新' : '已保存')),
-        );
         _poppedBySave = true;
         Navigator.of(context).pop();
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('保存失败，请重试')),
+        showCupertinoDialog(
+          context: context,
+          builder: (ctx) => CupertinoAlertDialog(
+            content: const Text('保存失败，请重试'),
+            actions: [
+              CupertinoDialogAction(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('确定'),
+              ),
+            ],
+          ),
         );
       }
     }
@@ -977,22 +1093,24 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
 
     if (!hasContent && !_isDirty) return true;
 
-    final result = await showDialog<String>(
+    final result = await showCupertinoDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (ctx) => CupertinoAlertDialog(
         title: const Text('未保存的内容'),
         content: const Text('当前编辑的内容尚未保存，是否存入草稿箱？'),
         actions: [
-          TextButton(
+          CupertinoDialogAction(
             onPressed: () => Navigator.pop(ctx, 'discard'),
+            isDestructiveAction: true,
             child: const Text('放弃'),
           ),
-          TextButton(
+          CupertinoDialogAction(
             onPressed: () => Navigator.pop(ctx, 'cancel'),
             child: const Text('取消'),
           ),
-          FilledButton(
+          CupertinoDialogAction(
             onPressed: () => Navigator.pop(ctx, 'draft'),
+            isDefaultAction: true,
             child: const Text('存入草稿箱'),
           ),
         ],
@@ -1002,11 +1120,6 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
     switch (result) {
       case 'draft':
         await _saveToDraft();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('已存入草稿箱')),
-          );
-        }
         return true;
       case 'discard':
         // 如果是来自草稿，抛弃时顺便删除旧草稿
@@ -1035,35 +1148,32 @@ class _AddImageButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final brightness = CupertinoTheme.brightnessOf(context);
     return Padding(
       padding: const EdgeInsets.only(right: 8),
-      child: InkWell(
+      child: GestureDetector(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
         child: Container(
           width: 90,
           height: 90,
           decoration: BoxDecoration(
             border: Border.all(
-              color: colorScheme.outline.withValues(alpha: 0.3),
+              color: AppTokens.sep(brightness).withValues(alpha: 0.8),
               width: 1.5,
             ),
             borderRadius: BorderRadius.circular(12),
-            color: colorScheme.surfaceContainerHighest
-                .withValues(alpha: 0.3),
+            color: AppTokens.elevated(brightness),
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 24, color: colorScheme.primary),
+              Icon(icon, size: 24, color: AppTokens.primary),
               const SizedBox(height: 4),
               Text(
                 label,
-                style: Theme.of(context)
-                    .textTheme
-                    .labelSmall
-                    ?.copyWith(color: colorScheme.primary),
+                style: const TextStyle(fontSize: 11,
+                  color: AppTokens.primary,
+                ),
               ),
             ],
           ),
