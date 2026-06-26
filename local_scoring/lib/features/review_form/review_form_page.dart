@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -8,6 +9,7 @@ import 'package:uuid/uuid.dart';
 import '../../core/constants/templates.dart' as tmpl;
 import '../../core/utils/category_guesser.dart';
 import '../../core/utils/score_utils.dart';
+import '../../core/utils/similar_record_detector.dart';
 import '../../data/models/draft_item.dart';
 import '../../data/models/evaluation.dart';
 import '../../data/models/review_item.dart';
@@ -15,6 +17,7 @@ import '../../data/models/scoring_template.dart';
 import '../../data/repositories/local_json_review_repository.dart';
 import '../../providers/draft_provider.dart';
 import '../../providers/review_provider.dart';
+import '../review_detail/review_detail_page.dart';
 
 class ReviewFormPage extends ConsumerStatefulWidget {
   final ReviewItem? existingItem;
@@ -47,6 +50,10 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
   bool _isSaving = false;
   bool _isDirty = false;
   bool _poppedBySave = false; // 标记是否因保存退出，避免重复弹窗
+
+  // 相似记录检测
+  List<SimilarRecordResult> _similarRecords = [];
+  Timer? _similarCheckTimer;
 
   bool get isEditing => widget.existingItem != null;
   bool get isFromDraft => widget.draftId != null;
@@ -128,6 +135,30 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
         setState(() => _guessedCategory = guessed);
       }
     }
+    // 相似记录检测（防抖 400ms）
+    _similarCheckTimer?.cancel();
+    _similarCheckTimer = Timer(const Duration(milliseconds: 400), () {
+      _checkSimilarRecords();
+    });
+  }
+
+  void _checkSimilarRecords() {
+    final title = _titleController.text.trim();
+    final allItems = ref.read(reviewListProvider).items;
+    final templates = ref.read(templateListProvider).templates;
+
+    final results = SimilarRecordDetector.detect(
+      currentTitle: title,
+      currentCategory: _category,
+      currentTags: _tags,
+      allItems: allItems,
+      templates: templates,
+      excludeId: widget.existingItem?.id,
+    );
+
+    if (mounted) {
+      setState(() => _similarRecords = results);
+    }
   }
 
   void _initDimensions() {
@@ -145,6 +176,7 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
     _titleController.dispose();
     _reviewTextController.dispose();
     _tagController.dispose();
+    _similarCheckTimer?.cancel();
     super.dispose();
   }
 
@@ -202,7 +234,12 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
               validator: (v) =>
                   (v == null || v.trim().isEmpty) ? '请输入名称' : null,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
+
+            // 相似记录提示
+            _buildSimilarRecordsSection(colorScheme),
+
+            const SizedBox(height: 4),
 
             // 分类
             Text('分类', style: Theme.of(context).textTheme.labelLarge),
@@ -350,6 +387,7 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
                       setState(() {
                         _tags.remove(tag);
                       });
+                      _checkSimilarRecords();
                     },
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10)),
@@ -478,7 +516,118 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
         _tags.add(tag);
         _tagController.clear();
       });
+      _checkSimilarRecords();
     }
+  }
+
+  // ========== 相似记录检测 ==========
+
+  Widget _buildSimilarRecordsSection(ColorScheme colorScheme) {
+    if (_similarRecords.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.history, size: 16, color: colorScheme.secondary),
+            const SizedBox(width: 6),
+            Text(
+              '发现 ${_similarRecords.length} 条相似记录',
+              style: TextStyle(
+                fontSize: 13,
+                color: colorScheme.secondary,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 68,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: _similarRecords.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (context, index) {
+              final result = _similarRecords[index];
+              final item = result.item;
+              return Material(
+                color: colorScheme.secondaryContainer.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(12),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            ReviewDetailPage(reviewId: item.id),
+                      ),
+                    );
+                  },
+                  child: Container(
+                    constraints: const BoxConstraints(maxWidth: 200),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          item.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            color: colorScheme.onSecondaryContainer,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            Icon(Icons.star,
+                                size: 12,
+                                color: colorScheme.onSecondaryContainer
+                                    .withValues(alpha: 0.7)),
+                            const SizedBox(width: 2),
+                            Text(
+                              item.score.toStringAsFixed(1),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: colorScheme.onSecondaryContainer
+                                    .withValues(alpha: 0.7),
+                              ),
+                            ),
+                            if (result.matchedTagCount > 0) ...[
+                              const SizedBox(width: 8),
+                              Icon(Icons.local_offer,
+                                  size: 11,
+                                  color: colorScheme.onSecondaryContainer
+                                      .withValues(alpha: 0.7)),
+                              const SizedBox(width: 2),
+                              Text(
+                                '${result.matchedTagCount}个匹配标签',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: colorScheme.onSecondaryContainer
+                                      .withValues(alpha: 0.7),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
   }
 
   // ========== 模板选择器 ==========
@@ -555,6 +704,7 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
       _dimensions = tmpl.getTemplateDefaultDimensions(templates, template.id);
       _guessedCategory = null;
     });
+    _checkSimilarRecords();
   }
 
   void _showCreateTemplateDialog() {
