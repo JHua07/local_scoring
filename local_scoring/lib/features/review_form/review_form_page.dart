@@ -22,6 +22,7 @@ import '../../providers/draft_provider.dart';
 import '../../providers/review_provider.dart';
 import '../../shared/widgets/ios_rating_row.dart';
 import '../review_detail/review_detail_page.dart';
+import '../settings/template_library_page.dart';
 
 class ReviewFormPage extends ConsumerStatefulWidget {
   final ReviewItem? existingItem;
@@ -34,7 +35,6 @@ class ReviewFormPage extends ConsumerStatefulWidget {
 }
 
 class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
-  final _formKey = GlobalKey<FormState>();
   final _uuid = const Uuid();
   final _picker = ImagePicker();
 
@@ -200,6 +200,11 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
       child: CupertinoPageScaffold(
         backgroundColor: AppTokens.bg(brightness),
         navigationBar: CupertinoNavigationBar(
+          leading: CupertinoButton(
+            padding: EdgeInsets.zero,
+            child: const Text('取消', style: TextStyle(fontSize: 17)),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
           middle: Text(
             isFromDraft
                 ? '继续编辑（草稿）'
@@ -220,21 +225,26 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
                     )),
           ),
         ),
-        child: Form(
-          key: _formKey,
+        child: SafeArea(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(AppTokens.pagePaddingH, 8, AppTokens.pagePaddingH, 32),
+            padding: const EdgeInsets.fromLTRB(AppTokens.pagePaddingH, 16, AppTokens.pagePaddingH, 32),
             children: [
               // 名称
-              CupertinoTextFormFieldRow(
+              const Padding(
+                padding: EdgeInsets.only(bottom: 8),
+                child: Text('名称',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600,
+                      color: AppTokens.textSecondary)),
+              ),
+              CupertinoTextField(
                 controller: _titleController,
                 placeholder: '比如：楼下那家牛肉面',
-                prefix: const Text('名称 *',
-                    style: TextStyle(fontSize: 15,
-                      color: AppTokens.textSecondary,
-                    )),
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? '请输入名称' : null,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppTokens.card(brightness),
+                  borderRadius: BorderRadius.circular(AppTokens.radiusMD),
+                  border: Border.all(color: AppTokens.sep(brightness).withValues(alpha: 0.6)),
+                ),
               ),
               const SizedBox(height: 12),
 
@@ -353,28 +363,35 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
               const SizedBox(height: 20),
 
               // 评价
-              CupertinoTextFormFieldRow(
+              const Padding(
+                padding: EdgeInsets.only(bottom: 8),
+                child: Text('评价',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600,
+                      color: AppTokens.textSecondary)),
+              ),
+              CupertinoTextField(
                 controller: _reviewTextController,
                 placeholder: '留下一句话，之后翻回来会很有用。',
-                prefix: const Text('评价',
-                    style: TextStyle(fontSize: 15,
-                      color: AppTokens.textSecondary,
-                    )),
                 maxLines: 3,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppTokens.card(brightness),
+                  borderRadius: BorderRadius.circular(AppTokens.radiusMD),
+                  border: Border.all(color: AppTokens.sep(brightness).withValues(alpha: 0.6)),
+                ),
               ),
               const SizedBox(height: 20),
 
               // 标签
+              const Padding(
+                padding: EdgeInsets.only(bottom: 8),
+                child: Text('标签',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600,
+                      color: AppTokens.textSecondary)),
+              ),
               CupertinoTextField(
                 controller: _tagController,
                 placeholder: '输入标签后按回车添加',
-                prefix: const Padding(
-                  padding: EdgeInsets.only(left: 12, right: 8),
-                  child: Text('标签',
-                      style: TextStyle(fontSize: 15,
-                        color: AppTokens.textSecondary,
-                      )),
-                ),
                 suffix: CupertinoButton(
                   padding: EdgeInsets.zero,
                   onPressed: _addTag,
@@ -382,7 +399,12 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
                       size: 20, color: AppTokens.primary),
                 ),
                 onSubmitted: (_) => _addTag(),
-                padding: const EdgeInsets.symmetric(vertical: 12),
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+                decoration: BoxDecoration(
+                  color: AppTokens.card(brightness),
+                  borderRadius: BorderRadius.circular(AppTokens.radiusMD),
+                  border: Border.all(color: AppTokens.sep(brightness).withValues(alpha: 0.6)),
+                ),
               ),
               if (_tags.isNotEmpty) ...[
                 const SizedBox(height: 8),
@@ -747,7 +769,13 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
               Text('新建自定义分类', style: TextStyle(fontSize: 14, color: AppTokens.primary)),
             ],
           ),
-          onPressed: _showCreateTemplateDialog,
+          onPressed: () {
+            Navigator.of(context).push(
+              CupertinoPageRoute(
+                builder: (_) => const TemplateLibraryPage(),
+              ),
+            );
+          },
         ),
       ],
     );
@@ -951,7 +979,6 @@ class _ReviewFormPageState extends ConsumerState<ReviewFormPage> {
   }
 
   Future<void> _save() async {
-    if (!_formKey.currentState!.validate()) return;
     if (_titleController.text.trim().isEmpty) {
       showCupertinoDialog(
         context: context,

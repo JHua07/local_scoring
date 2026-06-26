@@ -15,6 +15,7 @@ import '../../providers/theme_provider.dart';
 import '../../services/sync_service.dart';
 import 'draft_list_page.dart';
 import 'sync_settings_page.dart';
+import 'template_library_page.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -112,6 +113,18 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                     Navigator.of(context).push(
                       CupertinoPageRoute(
                         builder: (_) => const SyncSettingsPage(),
+                      ),
+                    );
+                  },
+                ),
+                _ActionRow(
+                  icon: CupertinoIcons.square_grid_2x2,
+                  title: '分类模板库',
+                  subtitle: '管理评分分类和自定义模板',
+                  onTap: () {
+                    Navigator.of(context).push(
+                      CupertinoPageRoute(
+                        builder: (_) => const TemplateLibraryPage(),
                       ),
                     );
                   },
