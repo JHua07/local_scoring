@@ -66,157 +66,159 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
         backgroundColor: AppTokens.bg(brightness).withValues(alpha: 0.85),
         border: null,
       ),
-      child: _loading
-          ? const Center(child: CupertinoActivityIndicator())
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-              children: [
-                _connectionHeader(svc, connected),
-                if (connected) ...[
+      child: SafeArea(
+        child: _loading
+            ? const Center(child: CupertinoActivityIndicator())
+            : ListView(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+                children: [
+                  _connectionHeader(svc, connected),
+                  if (connected) ...[
+                    const SizedBox(height: 22),
+                    _sectionLabel('同步'),
+                    _section([
+                      _tile(
+                        icon: Icons.cloud_download_rounded,
+                        tint: _blue,
+                        title: '拉取最新备份',
+                        subtitle: '用云端最新 ZIP 覆盖本地存档',
+                        busyLabel: '拉取',
+                        onTap: _syncAll,
+                      ),
+                      _divider(),
+                      _tile(
+                        icon: Icons.cloud_upload_rounded,
+                        tint: _orange,
+                        title: '推送当前存档',
+                        subtitle: '上传当前完整数据并生成快照',
+                        busyLabel: '推送',
+                        onTap: _pushToCloud,
+                      ),
+                      _divider(),
+                      _tile(
+                        icon: Icons.archive_rounded,
+                        tint: _green,
+                        title: '上传完整备份',
+                        subtitle: '手动生成并上传一个完整 ZIP',
+                        busyLabel: '上传完整备份',
+                        onTap: _uploadFullBackup,
+                      ),
+                      _divider(),
+                      _tile(
+                        icon: Icons.folder_copy_rounded,
+                        tint: _blue,
+                        title: '管理云端备份',
+                        subtitle: '查看 data/backups 目录中的 ZIP',
+                        onTap: _manageBackups,
+                      ),
+                      _divider(),
+                      _tile(
+                        icon: Icons.troubleshoot_rounded,
+                        tint: _green,
+                        title: '同步诊断',
+                        subtitle: '检查服务器版本、备份目录和最新快照',
+                        busyLabel: '诊断',
+                        onTap: _showDiagnostics,
+                      ),
+                    ]),
+                  ],
                   const SizedBox(height: 22),
-                  _sectionLabel('同步'),
+                  _sectionLabel('自动同步'),
                   _section([
-                    _tile(
-                      icon: Icons.cloud_download_rounded,
-                      tint: _blue,
-                      title: '拉取最新备份',
-                      subtitle: '用云端最新 ZIP 覆盖本地存档',
-                      busyLabel: '拉取',
-                      onTap: _syncAll,
-                    ),
-                    _divider(),
-                    _tile(
-                      icon: Icons.cloud_upload_rounded,
-                      tint: _orange,
-                      title: '推送当前存档',
-                      subtitle: '上传当前完整数据并生成快照',
-                      busyLabel: '推送',
-                      onTap: _pushToCloud,
-                    ),
-                    _divider(),
-                    _tile(
-                      icon: Icons.archive_rounded,
-                      tint: _green,
-                      title: '上传完整备份',
-                      subtitle: '手动生成并上传一个完整 ZIP',
-                      busyLabel: '上传完整备份',
-                      onTap: _uploadFullBackup,
-                    ),
-                    _divider(),
-                    _tile(
-                      icon: Icons.folder_copy_rounded,
-                      tint: _blue,
-                      title: '管理云端备份',
-                      subtitle: '查看 data/backups 目录中的 ZIP',
-                      onTap: _manageBackups,
-                    ),
-                    _divider(),
-                    _tile(
-                      icon: Icons.troubleshoot_rounded,
-                      tint: _green,
-                      title: '同步诊断',
-                      subtitle: '检查服务器版本、备份目录和最新快照',
-                      busyLabel: '诊断',
-                      onTap: _showDiagnostics,
-                    ),
-                  ]),
-                ],
-                const SizedBox(height: 22),
-                _sectionLabel('自动同步'),
-                _section([
-                  Material(
-                    color: Colors.transparent,
-                    child: SwitchListTile(
-                      contentPadding: const EdgeInsets.fromLTRB(14, 2, 10, 2),
-                      secondary: _iconBubble(
-                        Icons.schedule_rounded,
-                        connected ? _green : Colors.grey,
-                      ),
-                      title: const Text(
-                        '自动同步',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
+                    Material(
+                      color: Colors.transparent,
+                      child: SwitchListTile(
+                        contentPadding: const EdgeInsets.fromLTRB(14, 2, 10, 2),
+                        secondary: _iconBubble(
+                          Icons.schedule_rounded,
+                          connected ? _green : Colors.grey,
                         ),
-                      ),
-                      subtitle: Text(
-                        svc.autoBackup
-                            ? '间隔：${svc.backupIntervalLabel}'
-                            : (connected ? '关闭' : '请先连接服务器'),
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: AppTokens.txt2(
-                            CupertinoTheme.brightnessOf(context),
+                        title: const Text(
+                          '自动同步',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
+                        subtitle: Text(
+                          svc.autoBackup
+                              ? '间隔：${svc.backupIntervalLabel}'
+                              : (connected ? '关闭' : '请先连接服务器'),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppTokens.txt2(
+                              CupertinoTheme.brightnessOf(context),
+                            ),
+                          ),
+                        ),
+                        value: svc.autoBackup,
+                        activeThumbColor: _green,
+                        onChanged: connected
+                            ? (v) {
+                                ref
+                                    .read(syncServiceProvider)
+                                    .setAutoBackup(
+                                      v,
+                                      interval: svc.backupInterval,
+                                    );
+                                setState(() {});
+                              }
+                            : null,
                       ),
-                      value: svc.autoBackup,
-                      activeThumbColor: _green,
-                      onChanged: connected
-                          ? (v) {
+                    ),
+                    if (svc.autoBackup) ...[
+                      _divider(indent: 64),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: DropdownButtonFormField<BackupInterval>(
+                            initialValue: svc.backupInterval,
+                            decoration: const InputDecoration(
+                              labelText: '同步间隔',
+                              border: InputBorder.none,
+                            ),
+                            items: BackupInterval.values
+                                .map(
+                                  (e) => DropdownMenuItem(
+                                    value: e,
+                                    child: Text(_intervalLabel(e)),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (v) {
+                              if (v == null) return;
                               ref
                                   .read(syncServiceProvider)
-                                  .setAutoBackup(
-                                    v,
-                                    interval: svc.backupInterval,
-                                  );
+                                  .setAutoBackup(true, interval: v);
                               setState(() {});
-                            }
-                          : null,
-                    ),
-                  ),
-                  if (svc.autoBackup) ...[
-                    _divider(indent: 64),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-                      child: Material(
-                        color: Colors.transparent,
-                        child: DropdownButtonFormField<BackupInterval>(
-                          initialValue: svc.backupInterval,
-                          decoration: const InputDecoration(
-                            labelText: '同步间隔',
-                            border: InputBorder.none,
+                            },
                           ),
-                          items: BackupInterval.values
-                              .map(
-                                (e) => DropdownMenuItem(
-                                  value: e,
-                                  child: Text(_intervalLabel(e)),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (v) {
-                            if (v == null) return;
-                            ref
-                                .read(syncServiceProvider)
-                                .setAutoBackup(true, interval: v);
-                            setState(() {});
-                          },
                         ),
                       ),
-                    ),
-                  ],
-                ]),
-                if (connected) ...[
-                  const SizedBox(height: 22),
-                  _sectionLabel('连接'),
-                  _section([
-                    _tile(
-                      icon: Icons.link_off_rounded,
-                      tint: _red,
-                      title: '断开连接',
-                      subtitle: '清除本机保存的服务器配置',
-                      showChevron: false,
-                      onTap: _disconnect,
-                    ),
+                    ],
                   ]),
+                  if (connected) ...[
+                    const SizedBox(height: 22),
+                    _sectionLabel('连接'),
+                    _section([
+                      _tile(
+                        icon: Icons.link_off_rounded,
+                        tint: _red,
+                        title: '断开连接',
+                        subtitle: '清除本机保存的服务器配置',
+                        showChevron: false,
+                        onTap: _disconnect,
+                      ),
+                    ]),
+                  ],
+                  if (_status.isNotEmpty) ...[
+                    const SizedBox(height: 22),
+                    _statusPanel(),
+                  ],
                 ],
-                if (_status.isNotEmpty) ...[
-                  const SizedBox(height: 22),
-                  _statusPanel(),
-                ],
-              ],
-            ),
+              ),
+      ),
     );
   }
 

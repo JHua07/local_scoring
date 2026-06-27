@@ -42,42 +42,46 @@ class _DraftListPageState extends ConsumerState<DraftListPage> {
               )
             : null,
       ),
-      child: state.isLoading
-          ? const Center(child: CupertinoActivityIndicator())
-          : state.items.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(CupertinoIcons.doc_plaintext,
-                          size: 64, color: AppTokens.txt3(brightness)),
-                      const SizedBox(height: 16),
-                      Text(
-                        '草稿箱为空',
-                        style: TextStyle(fontSize: 16,
-                          color: AppTokens.txt2(brightness),
-                        ),
+      child: SafeArea(
+        child: state.isLoading
+            ? const Center(child: CupertinoActivityIndicator())
+            : state.items.isEmpty
+            ? Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      CupertinoIcons.doc_plaintext,
+                      size: 64,
+                      color: AppTokens.txt3(brightness),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      '草稿箱为空',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: AppTokens.txt2(brightness),
                       ),
-                    ],
-                  ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-                  itemCount: state.items.length,
-                  itemBuilder: (_, i) => _DraftCard(
-                    draft: state.items[i],
-                    onTap: () => _openDraft(state.items[i]),
-                    onDelete: () => _deleteDraft(state.items[i]),
-                  ),
+                    ),
+                  ],
                 ),
+              )
+            : ListView.builder(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+                itemCount: state.items.length,
+                itemBuilder: (_, i) => _DraftCard(
+                  draft: state.items[i],
+                  onTap: () => _openDraft(state.items[i]),
+                  onDelete: () => _deleteDraft(state.items[i]),
+                ),
+              ),
+      ),
     );
   }
 
   void _openDraft(DraftItem draft) async {
     await Navigator.of(context).push(
-      CupertinoPageRoute(
-        builder: (_) => ReviewFormPage(draftId: draft.id),
-      ),
+      CupertinoPageRoute(builder: (_) => ReviewFormPage(draftId: draft.id)),
     );
     if (mounted) {
       ref.read(draftListProvider.notifier).loadAll();
@@ -90,7 +94,8 @@ class _DraftListPageState extends ConsumerState<DraftListPage> {
       builder: (ctx) => CupertinoAlertDialog(
         title: const Text('删除草稿'),
         content: Text(
-            '确定要删除「${draft.title.isNotEmpty ? draft.title : "无标题"}」吗？'),
+          '确定要删除「${draft.title.isNotEmpty ? draft.title : "无标题"}」吗？',
+        ),
         actions: [
           CupertinoDialogAction(
             onPressed: () => Navigator.pop(ctx, false),
@@ -156,8 +161,7 @@ class _DraftCard extends StatelessWidget {
     final brightness = CupertinoTheme.brightnessOf(context);
     final dateStr = DateFormat('MM-dd HH:mm').format(draft.updatedAt);
     final title = draft.title.isNotEmpty ? draft.title : '无标题';
-    final preview =
-        draft.reviewText.isNotEmpty ? draft.reviewText : '暂无评价内容';
+    final preview = draft.reviewText.isNotEmpty ? draft.reviewText : '暂无评价内容';
 
     return GestureDetector(
       onTap: onTap,
@@ -184,8 +188,11 @@ class _DraftCard extends StatelessWidget {
                     color: AppTokens.warning.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(CupertinoIcons.doc_plaintext,
-                      size: 18, color: AppTokens.warning),
+                  child: const Icon(
+                    CupertinoIcons.doc_plaintext,
+                    size: 18,
+                    color: AppTokens.warning,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -196,7 +203,8 @@ class _DraftCard extends StatelessWidget {
                         title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontWeight: FontWeight.w600,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
                           fontSize: AppTokens.fontSizeCardTitle,
                           color: AppTokens.txt(brightness),
                         ),
@@ -206,7 +214,8 @@ class _DraftCard extends StatelessWidget {
                         preview,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: AppTokens.fontSizeCaption,
+                        style: TextStyle(
+                          fontSize: AppTokens.fontSizeCaption,
                           color: AppTokens.txt2(brightness),
                         ),
                       ),
@@ -222,8 +231,11 @@ class _DraftCard extends StatelessWidget {
                       color: AppTokens.danger.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(CupertinoIcons.trash,
-                        size: 16, color: AppTokens.danger),
+                    child: const Icon(
+                      CupertinoIcons.trash,
+                      size: 16,
+                      color: AppTokens.danger,
+                    ),
                   ),
                 ),
               ],
@@ -231,7 +243,8 @@ class _DraftCard extends StatelessWidget {
             const SizedBox(height: 10),
             Text(
               dateStr,
-              style: TextStyle(fontSize: AppTokens.fontSizeSmall,
+              style: TextStyle(
+                fontSize: AppTokens.fontSizeSmall,
                 color: AppTokens.txt2(brightness),
               ),
             ),
