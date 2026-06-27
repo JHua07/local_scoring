@@ -356,3 +356,124 @@ final templateListProvider =
       final repository = ref.watch(reviewRepositoryProvider);
       return TemplateListNotifier(repository);
     });
+
+// ==================== 缓存计算：首页数据 ====================
+
+class HomeData {
+  final int monthCount;
+  final double avgScore;
+  final ReviewItem? monthBest;
+  final ReviewItem? monthWorst;
+  final List<ReviewItem> recentItems;
+
+  const HomeData({
+    this.monthCount = 0,
+    this.avgScore = 0.0,
+    this.monthBest,
+    this.monthWorst,
+    this.recentItems = const [],
+  });
+}
+
+final homeDataProvider = Provider<HomeData>((ref) {
+  final items = ref.watch(reviewListProvider.select((s) => s.items));
+  if (items.isEmpty) return const HomeData();
+
+  final now = DateTime.now();
+  final thisMonth = items
+      .where((r) =>
+          r.createdAt.year == now.year && r.createdAt.month == now.month)
+      .toList();
+
+  return HomeData(
+    monthCount: thisMonth.length,
+    recentItems: items.length > 5 ? items.sublist(0, 5) : items,
+    monthBest: thisMonth.isNotEmpty
+        ? thisMonth.reduce((a, b) => a.score > b.score ? a : b)
+        : null,
+    monthWorst: thisMonth.isNotEmpty
+        ? thisMonth.reduce((a, b) => a.score < b.score ? a : b)
+        : null,
+    avgScore: thisMonth.isNotEmpty
+        ? thisMonth.map((r) => r.score).reduce((a, b) => a + b) /
+            thisMonth.length
+        : 0.0,
+  );
+});
+
+// ==================== 缓存计算：排行数据 ====================
+
+class RankingData {
+  final List<ReviewItem> top10;
+  final List<ReviewItem> bottom10;
+  final List<ReviewItem> worthItems;
+  final List<ReviewItem> notWorthItems;
+  final List<ReviewItem> recommendItems;
+  final Map<String, ReviewItem> categoryBest;
+
+  const RankingData({
+    this.top10 = const [],
+    this.bottom10 = const [],
+    this.worthItems = const [],
+    this.notWorthItems = const [],
+    this.recommendItems = const [],
+    this.categoryBest = const {},
+  });
+
+  bool get isEmpty =>
+      top10.isEmpty &&
+      bottom10.isEmpty &&
+      worthItems.isEmpty &&
+      notWorthItems.isEmpty &&
+      recommendItems.isEmpty;
+}
+
+final rankingDataProvider = Provider<RankingData>((ref) {
+  final items = ref.watch(reviewListProvider.select((s) => s.items));
+  if (items.isEmpty) return const RankingData();
+
+  // 最高分 Top10
+  final top10 = List<ReviewItem>.from(items)
+    ..sort((a, b) => b.score.compareTo(a.score));
+  final top10Limited = top10.length > 10 ? top10.sublist(0, 10) : top10;
+
+  // 最低分 Bottom10
+  final bottom10 = List<ReviewItem>.from(items)
+    ..sort((a, b) => a.score.compareTo(b.score));
+  final bottom10Limited =
+      bottom10.length > 10 ? bottom10.sublist(0, 10) : bottom10;
+
+  // 值得
+  final worthItems = items.where((r) => r.worth == 'worth').toList()
+    ..sort((a, b) => b.score.compareTo(a.score));
+
+  // 不值
+  final notWorthItems = items.where((r) => r.worth == 'not_worth').toList()
+    ..sort((a, b) => b.score.compareTo(a.score));
+
+  // 推荐
+  final recommendItems =
+      items.where((r) => r.recommendToFriends).toList()
+        ..sort((a, b) => b.score.compareTo(a.score));
+
+  // 各分类最高分
+  final templates = ref.watch(templateListProvider.select((s) => s.templates));
+  final categoryBest = <String, ReviewItem>{};
+  for (final template
+      in templates.where((t) => t.parentTemplateId == null)) {
+    final catItems = items.where((r) => r.category == template.id).toList();
+    if (catItems.isNotEmpty) {
+      catItems.sort((a, b) => b.score.compareTo(a.score));
+      categoryBest[template.id] = catItems.first;
+    }
+  }
+
+  return RankingData(
+    top10: top10Limited,
+    bottom10: bottom10Limited,
+    worthItems: worthItems,
+    notWorthItems: notWorthItems,
+    recommendItems: recommendItems,
+    categoryBest: categoryBest,
+  );
+});

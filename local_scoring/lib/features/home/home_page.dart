@@ -36,31 +36,20 @@ class _HomePageState extends ConsumerState<HomePage>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final state = ref.watch(reviewListProvider);
+    final isLoading = ref.watch(reviewListProvider.select((s) => s.isLoading));
+    final items = ref.watch(reviewListProvider.select((s) => s.items));
+    final homeData = ref.watch(homeDataProvider);
     final brightness = CupertinoTheme.brightnessOf(context);
-    final items = state.items;
 
-    final now = DateTime.now();
-    final thisMonth = items
-        .where((r) =>
-            r.createdAt.year == now.year && r.createdAt.month == now.month)
-        .toList();
-    final monthCount = thisMonth.length;
-    final recentItems = items.take(5).toList();
-    final monthBest = thisMonth.isNotEmpty
-        ? thisMonth.reduce((a, b) => a.score > b.score ? a : b)
-        : null;
-    final monthWorst = thisMonth.isNotEmpty
-        ? thisMonth.reduce((a, b) => a.score < b.score ? a : b)
-        : null;
-    final avgScore = thisMonth.isNotEmpty
-        ? thisMonth.map((r) => r.score).reduce((a, b) => a + b) /
-            thisMonth.length
-        : 0.0;
+    final monthCount = homeData.monthCount;
+    final avgScore = homeData.avgScore;
+    final monthBest = homeData.monthBest;
+    final monthWorst = homeData.monthWorst;
+    final recentItems = homeData.recentItems;
 
     return CupertinoPageScaffold(
       backgroundColor: AppTokens.bg(brightness),
-      child: state.isLoading
+      child: isLoading
           ? const Center(child: CupertinoActivityIndicator())
           : items.isEmpty
               ? _buildEmptyState(brightness)

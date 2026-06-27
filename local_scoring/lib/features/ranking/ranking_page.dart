@@ -26,11 +26,18 @@ class _RankingPageState extends ConsumerState<RankingPage>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final state = ref.watch(reviewListProvider);
+    final data = ref.watch(rankingDataProvider);
     final brightness = CupertinoTheme.brightnessOf(context);
-    final items = state.items;
+    final templates = ref.watch(templateListProvider.select((s) => s.templates));
 
-    if (items.isEmpty) {
+    final top10Limited = data.top10;
+    final bottom10Limited = data.bottom10;
+    final worthItems = data.worthItems;
+    final notWorthItems = data.notWorthItems;
+    final recommendItems = data.recommendItems;
+    final categoryBest = data.categoryBest;
+
+    if (data.isEmpty) {
       return CupertinoPageScaffold(
         backgroundColor: AppTokens.bg(brightness),
         child: CustomScrollView(
@@ -51,34 +58,6 @@ class _RankingPageState extends ConsumerState<RankingPage>
           ],
         ),
       );
-    }
-
-    final top10 = List<ReviewItem>.from(items)
-      ..sort((a, b) => b.score.compareTo(a.score));
-    final top10Limited = top10.take(10).toList();
-
-    final bottom10 = List<ReviewItem>.from(items)
-      ..sort((a, b) => a.score.compareTo(b.score));
-    final bottom10Limited = bottom10.take(10).toList();
-
-    final worthItems = items.where((r) => r.worth == 'worth').toList()
-      ..sort((a, b) => b.score.compareTo(a.score));
-
-    final notWorthItems = items.where((r) => r.worth == 'not_worth').toList()
-      ..sort((a, b) => b.score.compareTo(a.score));
-
-    final recommendItems =
-        items.where((r) => r.recommendToFriends).toList()
-          ..sort((a, b) => b.score.compareTo(a.score));
-
-    final templates = ref.watch(templateListProvider).templates;
-    final categoryBest = <String, ReviewItem>{};
-    for (final template in templates.where((t) => t.parentTemplateId == null)) {
-      final catItems = items.where((r) => r.category == template.id).toList();
-      if (catItems.isNotEmpty) {
-        catItems.sort((a, b) => b.score.compareTo(a.score));
-        categoryBest[template.id] = catItems.first;
-      }
     }
 
     return CupertinoPageScaffold(

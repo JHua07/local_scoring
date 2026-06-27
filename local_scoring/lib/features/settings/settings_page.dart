@@ -52,9 +52,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final state = ref.watch(reviewListProvider);
+    final items = ref.watch(reviewListProvider.select((s) => s.items));
     final brightness = CupertinoTheme.brightnessOf(context);
-    final items = state.items;
 
     return CupertinoPageScaffold(
       backgroundColor: AppTokens.bg(brightness),

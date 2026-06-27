@@ -37,10 +37,10 @@ class _ReviewDetailPageState extends ConsumerState<ReviewDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(reviewListProvider);
+    final items = ref.watch(reviewListProvider.select((s) => s.items));
     final colorScheme = Theme.of(context).colorScheme;
 
-    final item = state.items.where((r) => r.id == widget.reviewId).firstOrNull;
+    final item = items.where((r) => r.id == widget.reviewId).firstOrNull;
 
     if (item == null) {
       return Scaffold(
@@ -49,7 +49,7 @@ class _ReviewDetailPageState extends ConsumerState<ReviewDetailPage> {
       );
     }
 
-    final templates = ref.watch(templateListProvider).templates;
+    final templates = ref.watch(templateListProvider.select((s) => s.templates));
     final config = templates.isNotEmpty
         ? tmpl.getTemplateById(templates, item.category)
         : null;
@@ -103,36 +103,6 @@ class _ReviewDetailPageState extends ConsumerState<ReviewDetailPage> {
                 onPageChanged: (i) => setState(() => _currentImageIndex = i),
                 itemBuilder: (_, i) {
                   final path = item.imagePaths[i];
-                  final file = File(path);
-                  if (!file.existsSync()) {
-                    return Container(
-                      margin: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: colorScheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.broken_image_outlined,
-                              size: 48,
-                              color: colorScheme.outline,
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              '图片不存在',
-                              style: TextStyle(color: colorScheme.outline),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }
                   return Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 16,
@@ -140,7 +110,36 @@ class _ReviewDetailPageState extends ConsumerState<ReviewDetailPage> {
                     ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(16),
-                      child: Image.file(file, fit: BoxFit.cover),
+                      child: Image.file(
+                        File(path),
+                        fit: BoxFit.cover,
+                        cacheWidth: 560,
+                        cacheHeight: 560,
+                        errorBuilder: (_, __, _) => Container(
+                          decoration: BoxDecoration(
+                            color: colorScheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.broken_image_outlined,
+                                  size: 48,
+                                  color: colorScheme.outline,
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  '图片不存在',
+                                  style:
+                                      TextStyle(color: colorScheme.outline),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
                   );
                 },
@@ -1167,15 +1166,16 @@ class _ScoreMainCard extends StatelessWidget {
                               child: SizedBox(
                                 width: 36,
                                 height: 36,
-                                child: File(eval.imagePaths.first).existsSync()
-                                    ? Image.file(
+                                child: Image.file(
                                         File(eval.imagePaths.first),
                                         fit: BoxFit.cover,
-                                      )
-                                    : Icon(
-                                        Icons.broken_image,
-                                        size: 16,
-                                        color: cs.outline,
+                                        cacheWidth: 72,
+                                        cacheHeight: 72,
+                                        errorBuilder: (_, __, _) => Icon(
+                                          Icons.broken_image,
+                                          size: 16,
+                                          color: cs.outline,
+                                        ),
                                       ),
                               ),
                             ),
@@ -1317,9 +1317,11 @@ class _ExpandedSection extends StatelessWidget {
                   child: SizedBox(
                     width: 48,
                     height: 48,
-                    child: f.existsSync()
-                        ? Image.file(f, fit: BoxFit.cover)
-                        : const Icon(Icons.broken_image, size: 24),
+                    child: Image.file(f, fit: BoxFit.cover,
+                        cacheWidth: 96,
+                        cacheHeight: 96,
+                        errorBuilder: (_, __, _) =>
+                            const Icon(Icons.broken_image, size: 24)),
                   ),
                 );
               }).toList(),
@@ -1598,7 +1600,9 @@ class _EvalFormPageState extends State<_EvalFormPage> {
                           child: SizedBox(
                             width: 70,
                             height: 70,
-                            child: Image.file(File(e.value), fit: BoxFit.cover),
+                            child: Image.file(File(e.value), fit: BoxFit.cover,
+                                cacheWidth: 140,
+                                cacheHeight: 140),
                           ),
                         ),
                         Positioned(

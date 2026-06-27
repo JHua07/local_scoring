@@ -46,10 +46,11 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final reviewState = ref.watch(reviewListProvider);
+    final reviewItems = ref.watch(reviewListProvider.select((s) => s.items));
+    final reviewIsLoading = ref.watch(reviewListProvider.select((s) => s.isLoading));
     final templateState = ref.watch(templateListProvider);
     final brightness = CupertinoTheme.brightnessOf(context);
-    var items = List<ReviewItem>.from(reviewState.items);
+    var items = List<ReviewItem>.from(reviewItems);
 
     // Search
     if (_searchQuery.isNotEmpty) {
@@ -93,7 +94,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
 
     return CupertinoPageScaffold(
       backgroundColor: AppTokens.bg(brightness),
-      child: reviewState.isLoading
+      child: reviewIsLoading
           ? const Center(child: CupertinoActivityIndicator())
           : CustomScrollView(
               slivers: [
