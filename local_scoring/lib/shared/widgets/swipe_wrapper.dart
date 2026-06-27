@@ -58,7 +58,7 @@ class _SwipeActionWrapperState extends State<SwipeActionWrapper> {
             ),
           ),
         ]))),
-        Transform.translate(offset: Offset(_dx, 0), child: widget.child),
+        Transform.translate(offset: Offset(_dx, 0), child: Material(type: MaterialType.transparency, child: widget.child)),
       ]),
     );
   }

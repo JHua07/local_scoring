@@ -27,7 +27,7 @@ class TimelineEntry extends StatelessWidget {
     final thumbPath = item.firstImagePath;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(16),
@@ -50,7 +50,7 @@ class TimelineEntry extends StatelessWidget {
               Row(children: [
                 // 日期
                 SizedBox(
-                  width: 72,
+                  width: 56,
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(_monthDay(item.createdAt),
                         style: Theme.of(context).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w600, color: colorScheme.primary)),
@@ -59,8 +59,19 @@ class TimelineEntry extends StatelessWidget {
                   ]),
                 ),
                 // 竖线
-                Container(width: 2, height: 36, margin: const EdgeInsets.symmetric(horizontal: 10), decoration: BoxDecoration(color: colorScheme.primary.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(1))),
-                // 缩略图（最早一张）
+                Container(width: 2, height: 36, margin: const EdgeInsets.symmetric(horizontal: 8), decoration: BoxDecoration(color: colorScheme.primary.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(1))),
+                // 分数 panel
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _scoreColor(item.score).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(item.score.toStringAsFixed(1),
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: _scoreColor(item.score))),
+                ),
+                const SizedBox(width: 8),
+                // 缩略图（最早一张）或分类图标
                 if (thumbPath != null && File(thumbPath).existsSync())
                   ClipRRect(
                     borderRadius: BorderRadius.circular(8),
@@ -73,27 +84,10 @@ class TimelineEntry extends StatelessWidget {
                     child: Center(child: Text(catIcon, style: const TextStyle(fontSize: 20))),
                   ),
                 const SizedBox(width: 10),
-                // 分数 panel
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: _scoreColor(item.score).withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(item.score.toStringAsFixed(1),
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: _scoreColor(item.score))),
-                ),
-                const SizedBox(width: 8),
-                // 标题 + 分类图标
+                // 标题
                 Expanded(
-                  child: Row(children: [
-                    Flexible(
-                      child: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(catIcon, style: const TextStyle(fontSize: 16)),
-                  ]),
+                  child: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
                 ),
                 AnimatedRotation(
                   turns: isExpanded ? 0.25 : 0,
@@ -102,7 +96,7 @@ class TimelineEntry extends StatelessWidget {
                 ),
               ]),
               if (isExpanded && expandedContent != null)
-                Padding(padding: const EdgeInsets.only(top: 12, left: 84), child: expandedContent!),
+                Padding(padding: const EdgeInsets.only(top: 12, left: 68), child: expandedContent!),
             ],
           ),
         ),
