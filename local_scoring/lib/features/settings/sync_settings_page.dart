@@ -124,62 +124,75 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                 const SizedBox(height: 22),
                 _sectionLabel('自动同步'),
                 _section([
-                  SwitchListTile(
-                    contentPadding: const EdgeInsets.fromLTRB(14, 2, 10, 2),
-                    secondary: _iconBubble(
-                      Icons.schedule_rounded,
-                      connected ? _green : Colors.grey,
-                    ),
-                    title: const Text(
-                      '自动同步',
-                      style: TextStyle(fontSize: 16,
-                        fontWeight: FontWeight.w600,
+                  Material(
+                    color: Colors.transparent,
+                    child: SwitchListTile(
+                      contentPadding: const EdgeInsets.fromLTRB(14, 2, 10, 2),
+                      secondary: _iconBubble(
+                        Icons.schedule_rounded,
+                        connected ? _green : Colors.grey,
                       ),
-                    ),
-                    subtitle: Text(
-                      svc.autoBackup
-                          ? '间隔：${svc.backupIntervalLabel}'
-                          : (connected ? '关闭' : '请先连接服务器'),
-                      style: TextStyle(fontSize: 12,
-                        color: AppTokens.txt2(CupertinoTheme.brightnessOf(context)),
+                      title: const Text(
+                        '自动同步',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
+                      subtitle: Text(
+                        svc.autoBackup
+                            ? '间隔：${svc.backupIntervalLabel}'
+                            : (connected ? '关闭' : '请先连接服务器'),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppTokens.txt2(
+                            CupertinoTheme.brightnessOf(context),
+                          ),
+                        ),
+                      ),
+                      value: svc.autoBackup,
+                      activeThumbColor: _green,
+                      onChanged: connected
+                          ? (v) {
+                              ref
+                                  .read(syncServiceProvider)
+                                  .setAutoBackup(
+                                    v,
+                                    interval: svc.backupInterval,
+                                  );
+                              setState(() {});
+                            }
+                          : null,
                     ),
-                    value: svc.autoBackup,
-                    activeThumbColor: _green,
-                    onChanged: connected
-                        ? (v) {
-                            ref
-                                .read(syncServiceProvider)
-                                .setAutoBackup(v, interval: svc.backupInterval);
-                            setState(() {});
-                          }
-                        : null,
                   ),
                   if (svc.autoBackup) ...[
                     _divider(indent: 64),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-                      child: DropdownButtonFormField<BackupInterval>(
-                        initialValue: svc.backupInterval,
-                        decoration: const InputDecoration(
-                          labelText: '同步间隔',
-                          border: InputBorder.none,
+                      child: Material(
+                        color: Colors.transparent,
+                        child: DropdownButtonFormField<BackupInterval>(
+                          initialValue: svc.backupInterval,
+                          decoration: const InputDecoration(
+                            labelText: '同步间隔',
+                            border: InputBorder.none,
+                          ),
+                          items: BackupInterval.values
+                              .map(
+                                (e) => DropdownMenuItem(
+                                  value: e,
+                                  child: Text(_intervalLabel(e)),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (v) {
+                            if (v == null) return;
+                            ref
+                                .read(syncServiceProvider)
+                                .setAutoBackup(true, interval: v);
+                            setState(() {});
+                          },
                         ),
-                        items: BackupInterval.values
-                            .map(
-                              (e) => DropdownMenuItem(
-                                value: e,
-                                child: Text(_intervalLabel(e)),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (v) {
-                          if (v == null) return;
-                          ref
-                              .read(syncServiceProvider)
-                              .setAutoBackup(true, interval: v);
-                          setState(() {});
-                        },
                       ),
                     ),
                   ],
@@ -214,7 +227,9 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
       decoration: BoxDecoration(
         color: _groupColor(context),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AppTokens.sep(brightness).withValues(alpha: 0.6)),
+        border: Border.all(
+          color: AppTokens.sep(brightness).withValues(alpha: 0.6),
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.05),
@@ -241,7 +256,8 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                   children: [
                     Text(
                       connected ? '已连接到服务器' : '未连接',
-                      style: const TextStyle(fontSize: 22,
+                      style: const TextStyle(
+                        fontSize: 22,
                         fontWeight: FontWeight.w800,
                         letterSpacing: 0,
                       ),
@@ -249,7 +265,8 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                     const SizedBox(height: 4),
                     Text(
                       connected ? '设备 ${svc.deviceId}' : '输入服务器地址后连接',
-                      style: TextStyle(fontSize: 13,
+                      style: TextStyle(
+                        fontSize: 13,
                         color: AppTokens.txt2(brightness),
                         fontFamily: connected ? 'monospace' : null,
                       ),
@@ -290,28 +307,39 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
       decoration: BoxDecoration(
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTokens.sep(brightness).withValues(alpha: 0.6)),
+        border: Border.all(
+          color: AppTokens.sep(brightness).withValues(alpha: 0.6),
+        ),
       ),
       child: Row(
         children: [
-          Icon(_busy ? CupertinoIcons.arrow_2_squarepath : Icons.network_check_rounded, size: 18, color: _blue),
+          Icon(
+            _busy
+                ? CupertinoIcons.arrow_2_squarepath
+                : Icons.network_check_rounded,
+            size: 18,
+            color: _blue,
+          ),
           const SizedBox(width: 8),
           Expanded(
-            child: TextField(
-              controller: _urlCtrl,
-              style: const TextStyle(fontSize: 14, letterSpacing: 0),
-              decoration: const InputDecoration(
-                hintText: 'https://your-server.com',
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                isDense: true,
-                filled: false,
-                fillColor: Colors.transparent,
-                contentPadding: EdgeInsets.zero,
+            child: Material(
+              color: Colors.transparent,
+              child: TextField(
+                controller: _urlCtrl,
+                style: const TextStyle(fontSize: 14, letterSpacing: 0),
+                decoration: const InputDecoration(
+                  hintText: 'https://your-server.com',
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  isDense: true,
+                  filled: false,
+                  fillColor: Colors.transparent,
+                  contentPadding: EdgeInsets.zero,
+                ),
+                keyboardType: TextInputType.url,
+                onChanged: (_) => setState(() {}),
               ),
-              keyboardType: TextInputType.url,
-              onChanged: (_) => setState(() {}),
             ),
           ),
         ],
@@ -345,7 +373,8 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(fontSize: 15,
+                  style: const TextStyle(
+                    fontSize: 15,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -357,7 +386,11 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                   child: CircularProgressIndicator(strokeWidth: 2, color: tint),
                 )
               else
-                Icon(Icons.chevron_right_rounded, color: AppTokens.txt2(brightness), size: 21),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: AppTokens.txt2(brightness),
+                  size: 21,
+                ),
             ],
           ),
         ),
@@ -370,7 +403,8 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
       padding: const EdgeInsets.only(left: 4, bottom: 8),
       child: Text(
         text,
-        style: TextStyle(fontSize: 13,
+        style: TextStyle(
+          fontSize: 13,
           fontWeight: FontWeight.w600,
           color: AppTokens.txt2(CupertinoTheme.brightnessOf(context)),
         ),
@@ -379,15 +413,14 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
   }
 
   Widget _section(List<Widget> children) {
+    final brightness = CupertinoTheme.brightnessOf(context);
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: _groupColor(context),
           border: Border.all(
-            color: Theme.of(
-              context,
-            ).colorScheme.outlineVariant.withValues(alpha: 0.32),
+            color: AppTokens.sep(brightness).withValues(alpha: 0.32),
           ),
         ),
         child: Column(mainAxisSize: MainAxisSize.min, children: children),
@@ -422,7 +455,8 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(fontSize: 16,
+                      style: const TextStyle(
+                        fontSize: 16,
                         fontWeight: FontWeight.w600,
                         letterSpacing: 0,
                       ),
@@ -430,7 +464,10 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                     const SizedBox(height: 3),
                     Text(
                       subtitle,
-                      style: TextStyle(fontSize: 12, color: AppTokens.txt2(brightness)),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppTokens.txt2(brightness),
+                      ),
                     ),
                   ],
                 ),
@@ -443,7 +480,11 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                   child: CircularProgressIndicator(strokeWidth: 2, color: tint),
                 )
               else if (showChevron)
-                Icon(Icons.chevron_right_rounded, color: AppTokens.txt2(brightness), size: 22),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: AppTokens.txt2(brightness),
+                  size: 22,
+                ),
             ],
           ),
         ),
@@ -452,13 +493,13 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
   }
 
   Widget _divider({double indent = 58}) {
-    return Divider(
-      height: 1,
-      thickness: 0.6,
-      indent: indent,
-      color: Theme.of(
-        context,
-      ).colorScheme.outlineVariant.withValues(alpha: 0.5),
+    final brightness = CupertinoTheme.brightnessOf(context);
+    return Padding(
+      padding: EdgeInsets.only(left: indent),
+      child: Container(
+        height: 0.6,
+        color: AppTokens.sep(brightness).withValues(alpha: 0.5),
+      ),
     );
   }
 
@@ -790,7 +831,8 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                 Expanded(
                   child: Text(
                     diagnostics.healthOk ? '同步接口正常' : '同步接口异常',
-                    style: const TextStyle(fontSize: 22,
+                    style: const TextStyle(
+                      fontSize: 22,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
@@ -840,7 +882,8 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
             width: 72,
             child: Text(
               label,
-              style: TextStyle(fontSize: 13,
+              style: TextStyle(
+                fontSize: 13,
                 color: AppTokens.txt2(brightness),
                 fontWeight: FontWeight.w600,
               ),
@@ -849,7 +892,8 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
           Expanded(
             child: SelectableText(
               value,
-              style: const TextStyle(fontSize: 13,
+              style: const TextStyle(
+                fontSize: 13,
                 fontFamily: 'monospace',
                 letterSpacing: 0,
               ),
@@ -912,15 +956,19 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                           children: [
                             const Text(
                               '云端备份',
-                              style: TextStyle(fontSize: 24,
+                              style: TextStyle(
+                                fontSize: 24,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
                             const SizedBox(height: 4),
                             Text(
                               'data/backups 目录中的 ${list.length} 个 ZIP',
-                              style: TextStyle(fontSize: 13,
-                                color: AppTokens.txt2(CupertinoTheme.brightnessOf(context)),
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: AppTokens.txt2(
+                                  CupertinoTheme.brightnessOf(context),
+                                ),
                               ),
                             ),
                           ],
@@ -1035,7 +1083,8 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
           const SizedBox(height: 6),
           Text(
             '推送或上传完整备份后会出现在这里',
-            style: TextStyle(fontSize: 13,
+            style: TextStyle(
+              fontSize: 13,
               color: AppTokens.txt2(CupertinoTheme.brightnessOf(context)),
             ),
             textAlign: TextAlign.center,
@@ -1060,7 +1109,9 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
       decoration: BoxDecoration(
         color: _pageBackground(context),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTokens.sep(brightness).withValues(alpha: 0.6)),
+        border: Border.all(
+          color: AppTokens.sep(brightness).withValues(alpha: 0.6),
+        ),
       ),
       child: Row(
         children: [
@@ -1078,7 +1129,8 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                         name,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 14,
+                        style: const TextStyle(
+                          fontSize: 14,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -1099,7 +1151,8 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                         ),
                         child: Text(
                           'NEW',
-                          style: TextStyle(fontSize: 10,
+                          style: TextStyle(
+                            fontSize: 10,
                             fontWeight: FontWeight.w800,
                             color: _green,
                             letterSpacing: 0,
@@ -1115,7 +1168,10 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                     if (createdAt.isNotEmpty) createdAt,
                     if (size.isNotEmpty) size,
                   ].join(' · '),
-                  style: TextStyle(fontSize: 12, color: AppTokens.txt2(brightness)),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppTokens.txt2(brightness),
+                  ),
                 ),
               ],
             ),
